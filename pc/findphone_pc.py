@@ -85,7 +85,7 @@ def lan_ips():
             if ipaddress.ip_address(ip).is_private and not ip.startswith(("127.", "169.254."))]
 
 
-def send_command(key: bytes, cmd: bytes, timeout: float = 5.0) -> bool:
+def send_command(key: bytes, cmd, timeout: float = 5.0, log=lambda msg: None):
     """スマホを探して cmd(b'R'=鳴らす / b'S'=止める) を送り、受理通知まで確認する。
     cmd が None のときは探すだけで、正しい鍵で応答したスマホのIPを返す(接続確認用)。"""
     cn = os.urandom(8)
@@ -98,7 +98,9 @@ def send_command(key: bytes, cmd: bytes, timeout: float = 5.0) -> bool:
             s.ioctl(socket.SIO_UDP_CONNRESET, False)
         socks.append((ip, s))
     if not socks:
+        log("LANのIPアドレスが見つかりません(ネットワーク未接続?)")
         return False
+    log("送信元: " + ", ".join(ip for ip, _ in socks))
 
     try:
         end = time.time() + timeout
@@ -125,15 +127,20 @@ def send_command(key: bytes, cmd: bytes, timeout: float = 5.0) -> bool:
                 if len(data) == 57 and data[:1] == b"C" and data[1:9] == cn:
                     sn = data[9:25]
                     if not hmac.compare_digest(data[25:], mac(key, b"C", cn, sn)):
+                        log(f"{addr[0]} が応答したが鍵が一致しません → スマホのコードで再ペアリング")
                         continue  # 鍵を知らない相手は無視
+                    log(f"スマホ発見: {addr[0]}")
                     if cmd is None:
                         return addr[0]
                     s.sendto(cmd + sn + mac(key, cmd, sn), addr)
+                    log("命令を送信")
                     waiting_ack[s] = sn
                 elif len(data) == 50 and data[:1] == b"A" and data[1:2] == cmd and s in waiting_ack:
                     sn = waiting_ack[s]
                     if data[2:18] == sn and hmac.compare_digest(data[18:], mac(key, b"A", cmd, sn)):
+                        log("スマホが命令を受理")
                         return True
+        log(f"{timeout:.0f}秒以内に応答なし")
         return False
     finally:
         for _, s in socks:
@@ -146,8 +153,8 @@ class App:
     def __init__(self):
         self.root = tk.Tk()
         self.root.title("スマホ探し")
-        self.root.geometry("260x260")
-        self.root.resizable(False, False)
+        self.root.geometry("360x480")
+        self.root.minsize(300, 380)
         self.root.configure(bg="#111111")
         self.key = load_key()
 
@@ -158,14 +165,33 @@ class App:
         self.ring_btn = self._button("スマホを鳴らす", lambda: self.run(b"R"), "#2e7d32")
         self.stop_btn = self._button("止める", lambda: self.run(b"S"), "#444444")
         self._button("ペアリング設定", self.pair, "#222222")
+        self.log_box = tk.Text(self.root, height=10, bg="#1b1b1b", fg="#9e9e9e", relief="flat",
+                               font=("Consolas", 9), state="disabled", wrap="word")
+        self.log_box.pack(fill="both", expand=True, padx=8, pady=(6, 8))
+        self._link_state = None
         self.show("未ペアリング" if self.key is None else "準備OK")
+        self.log("起動")
         threading.Thread(target=self._watch_link, daemon=True).start()
 
     def _watch_link(self):
         """3秒ごとにスマホへ問い合わせ、リンク状態をリアルタイム表示する。"""
         while True:
-            ip = send_command(self.key, None, timeout=2.0) if self.key else None
+            notes = []
+            ip = send_command(self.key, None, timeout=2.0, log=notes.append) if self.key else None
             self.root.after(0, self._set_link, ip)
+            # 接続確認は3秒ごとなので、状態が変わった時だけログに出す
+            mismatch = tuple(m for m in notes if "鍵が一致" in m)
+            state = (ip, mismatch, self.key is None)
+            if state != self._link_state:
+                self._link_state = state
+                if self.key is None:
+                    self.log("接続確認: 未ペアリング")
+                elif ip:
+                    self.log(f"接続確認: 接続中 {ip}")
+                else:
+                    self.log("接続確認: 応答なし")
+                for m in mismatch:
+                    self.log(m)
             time.sleep(3)
 
     def _set_link(self, ip):
@@ -185,6 +211,19 @@ class App:
     def show(self, msg):
         self.status.config(text=msg)
 
+    def log(self, msg):
+        """どのスレッドからでも呼べるログ出力。"""
+        line = time.strftime("%H:%M:%S ") + msg + "\n"
+        self.root.after(0, self._append_log, line)
+
+    def _append_log(self, line):
+        self.log_box.config(state="normal")
+        self.log_box.insert("end", line)
+        if int(self.log_box.index("end-1c").split(".")[0]) > 300:
+            self.log_box.delete("1.0", "50.0")
+        self.log_box.see("end")
+        self.log_box.config(state="disabled")
+
     def pair(self):
         """クリップボードのコードを優先し、無ければ入力ダイアログで受け取る。"""
         for text in (self._clipboard(), None):
@@ -203,6 +242,7 @@ class App:
                 return
             self.key = key
             self.show("ペアリング完了")
+            self.log("ペアリング完了")
             return
         messagebox.showerror("エラー", "コードが正しくありません(スマホ側アプリが古い可能性)")
 
@@ -221,7 +261,8 @@ class App:
         threading.Thread(target=self._work, args=(cmd,), daemon=True).start()
 
     def _work(self, cmd):
-        ok = send_command(self.key, cmd)
+        self.log("鳴らす" if cmd == b"R" else "止める")
+        ok = send_command(self.key, cmd, log=self.log)
         msg = ("鳴らしています" if cmd == b"R" else "停止しました") if ok else "見つかりません(同じWi-Fi?/コード?)"
         self.root.after(0, self.show, msg)
 
