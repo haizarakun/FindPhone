@@ -93,6 +93,8 @@ def send_command(key: bytes, cmd: bytes, timeout: float = 5.0) -> bool:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         s.bind((ip, 0))
+        if hasattr(socket, "SIO_UDP_CONNRESET"):  # Windows: ICMP到達不能で受信が例外になるのを防ぐ
+            s.ioctl(socket.SIO_UDP_CONNRESET, False)
         socks.append((ip, s))
     if not socks:
         return False
@@ -105,14 +107,20 @@ def send_command(key: bytes, cmd: bytes, timeout: float = 5.0) -> bool:
             if time.time() >= next_hello:  # 1秒ごとに再送(UDP取りこぼし対策)
                 next_hello = time.time() + 1
                 for ip, s in socks:
-                    for dst in (ip.rsplit(".", 1)[0] + ".255", "255.255.255.255"):
+                    prefix = ip.rsplit(".", 1)[0]
+                    # ブロードキャストに加え、同じ /24 の全端末へ直接送る(スリープ中の端末はブロードキャストを捨てることがある)
+                    hosts = [f"{prefix}.{n}" for n in range(1, 255) if f"{prefix}.{n}" != ip]
+                    for dst in [prefix + ".255", "255.255.255.255"] + hosts:
                         try:
                             s.sendto(b"H" + cn, (dst, PORT))
                         except OSError:
                             pass
             ready, _, _ = select.select([s for _, s in socks], [], [], 0.2)
             for s in ready:
-                data, addr = s.recvfrom(128)
+                try:
+                    data, addr = s.recvfrom(128)
+                except OSError:
+                    continue
                 if len(data) == 57 and data[:1] == b"C" and data[1:9] == cn:
                     sn = data[9:25]
                     if not hmac.compare_digest(data[25:], mac(key, b"C", cn, sn)):
