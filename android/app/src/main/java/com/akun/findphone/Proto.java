@@ -2,18 +2,26 @@ package com.akun.findphone;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.security.keystore.KeyGenParameterSpec;
+import android.security.keystore.KeyProperties;
 import android.util.Base64;
 
+import java.security.Key;
+import java.security.KeyStore;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
 
+import javax.crypto.Cipher;
+import javax.crypto.KeyGenerator;
 import javax.crypto.Mac;
+import javax.crypto.SecretKey;
+import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 
 /**
  * 通信プロトコルと鍵の保管。
  *
- * PC -> 'H' + cn(8)                      : 探索(ブロードキャスト)
+ * PC -> 'H' + cn(8)                      : 探索(ブロードキャスト/ユニキャスト)
  * 端末 -> 'C' + cn + sn(16) + HMAC       : チャレンジ(鍵を知っている証明)
  * PC -> 'R'|'S' + sn + HMAC              : 鳴らす / 止める(snは1回限り・10秒有効)
  * 端末 -> 'A' + cmd + sn + HMAC          : 受理通知
@@ -26,19 +34,85 @@ final class Proto {
 
     private Proto() {}
 
-    static SharedPreferences prefs(Context c) {
-        return c.getSharedPreferences("p", Context.MODE_PRIVATE);
-    }
+    // ---- 鍵の保管 ----
+    // 共有鍵は Android Keystore 内のAES鍵で暗号化して保存する(root等で設定ファイルを読まれても漏れない)。
+
+    private static final String KEYSTORE = "AndroidKeyStore";
+    private static final String WRAP_ALIAS = "findphone-wrap";
+    private static final String PREF_WRAPPED = "kc";
+    private static final String PREF_LEGACY_PLAIN = "k";
+    private static volatile byte[] cachedKey;
 
     static byte[] key(Context c) {
-        String s = prefs(c).getString("k", null);
-        return s != null ? Base64.decode(s, Base64.NO_WRAP) : regenerate(c);
+        byte[] k = cachedKey;
+        if (k == null) {
+            synchronized (Proto.class) {
+                if (cachedKey == null) cachedKey = load(c);
+                k = cachedKey;
+            }
+        }
+        return k;
     }
 
-    static byte[] regenerate(Context c) {
+    static synchronized void regenerate(Context c) {
         byte[] k = random(16);
-        prefs(c).edit().putString("k", Base64.encodeToString(k, Base64.NO_WRAP)).apply();
+        store(c, k);
+        cachedKey = k;
+    }
+
+    private static byte[] load(Context c) {
+        SharedPreferences p = Prefs.of(c);
+        String wrapped = p.getString(PREF_WRAPPED, null);
+        if (wrapped != null) {
+            try {
+                return unwrap(Base64.decode(wrapped, Base64.NO_WRAP));
+            } catch (Exception e) {
+                // Keystoreの鍵が失われた場合は作り直す(再ペアリングが必要)
+            }
+        }
+        String plain = p.getString(PREF_LEGACY_PLAIN, null); // 旧版の平文保存から移行
+        byte[] k = plain != null ? Base64.decode(plain, Base64.NO_WRAP) : random(16);
+        store(c, k);
         return k;
+    }
+
+    private static void store(Context c, byte[] k) {
+        SharedPreferences.Editor e = Prefs.of(c).edit();
+        try {
+            e.putString(PREF_WRAPPED, Base64.encodeToString(wrap(k), Base64.NO_WRAP)).remove(PREF_LEGACY_PLAIN);
+        } catch (Exception ex) {
+            // Keystoreが使えない端末のみ、アプリ専用領域に平文で保存する
+            e.putString(PREF_LEGACY_PLAIN, Base64.encodeToString(k, Base64.NO_WRAP)).remove(PREF_WRAPPED);
+        }
+        e.apply();
+    }
+
+    private static SecretKey wrapKey() throws Exception {
+        KeyStore ks = KeyStore.getInstance(KEYSTORE);
+        ks.load(null);
+        Key existing = ks.getKey(WRAP_ALIAS, null);
+        if (existing != null) return (SecretKey) existing;
+        KeyGenerator g = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, KEYSTORE);
+        g.init(new KeyGenParameterSpec.Builder(WRAP_ALIAS,
+                KeyProperties.PURPOSE_ENCRYPT | KeyProperties.PURPOSE_DECRYPT)
+                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                .setKeySize(256)
+                .build());
+        return g.generateKey();
+    }
+
+    /** 出力: IV(12) + 暗号文。 */
+    private static byte[] wrap(byte[] plain) throws Exception {
+        Cipher c = Cipher.getInstance("AES/GCM/NoPadding");
+        c.init(Cipher.ENCRYPT_MODE, wrapKey());
+        return cat(c.getIV(), c.doFinal(plain));
+    }
+
+    private static byte[] unwrap(byte[] data) throws Exception {
+        Cipher c = Cipher.getInstance("AES/GCM/NoPadding");
+        c.init(Cipher.DECRYPT_MODE, wrapKey(), new GCMParameterSpec(128, data, 0, 12));
+        return c.doFinal(data, 12, data.length - 12);
     }
 
     /** PCに入力するペアリングコード(Base32・4文字区切り)。 */

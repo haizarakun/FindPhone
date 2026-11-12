@@ -21,15 +21,23 @@ jobs:
           KS: ${{ secrets.KEYSTORE_BASE64 }}
         run: |
           if [ -n "$KS" ]; then echo "$KS" | base64 -d > android/release.jks; fi
+      # 専用の署名鍵が未設定の間も、ビルドごとに署名が変わらないようdebug鍵を使い回す
+      # (署名が同じなら、アンインストールせずに上書き更新できる)
+      - uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: findphone-debug-keystore-v1
       - name: Build
         env:
           KS_PASS: ${{ secrets.KS_PASS }}
           KS_ALIAS: ${{ secrets.KS_ALIAS }}
-        run: gradle -p android assembleRelease --no-daemon
+        run: |
+          gradle -p android assembleRelease --no-daemon
+          cp android/app/build/outputs/apk/release/*.apk FindPhone.apk
       - uses: actions/upload-artifact@v4
         with:
           name: FindPhone-apk
-          path: android/app/build/outputs/apk/release/*.apk
+          path: FindPhone.apk
 
   pc:
     runs-on: windows-latest
@@ -38,9 +46,41 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Test protocol
+        run: python pc/test_protocol.py
       - run: pip install pyinstaller
-      - run: pyinstaller --onefile --noconsole --name FindPhone pc/findphone_pc.py
+      # 使わない標準モジュール(OpenSSLなど)を外してexeを小さく・起動を速くする
+      - name: Build
+        run: >
+          pyinstaller --onefile --noconsole --name FindPhone
+          --icon pc/icon.ico --add-data "pc/icon.ico;." --version-file pc/version.txt
+          --exclude-module _hashlib --exclude-module _ssl --exclude-module ssl
+          --exclude-module _bz2 --exclude-module _lzma --exclude-module _decimal
+          --exclude-module pyexpat --exclude-module _asyncio --exclude-module _overlapped
+          --exclude-module _multiprocessing
+          pc/findphone_pc.py
+      - name: Self-test the exe
+        timeout-minutes: 2
+        run: |
+          $p = Start-Process -FilePath dist\FindPhone.exe -ArgumentList '--selftest' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { Write-Error "selftest failed: $($p.ExitCode)"; exit 1 }
+          "{0:N1} MB" -f ((Get-Item dist\FindPhone.exe).Length / 1MB)
       - uses: actions/upload-artifact@v4
         with:
           name: FindPhone-exe
           path: dist/FindPhone.exe
+
+  # v で始まるタグを push すると、APK と EXE を付けたリリースを作る
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [apk, pc]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" FindPhone.apk FindPhone.exe --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes

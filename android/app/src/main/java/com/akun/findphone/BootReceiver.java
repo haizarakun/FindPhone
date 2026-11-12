@@ -8,7 +8,8 @@ import android.content.Intent;
 public class BootReceiver extends BroadcastReceiver {
     @Override
     public void onReceive(Context c, Intent i) {
-        if (Proto.prefs(c).getBoolean("on", false)) {
+        if (!Intent.ACTION_BOOT_COMPLETED.equals(i.getAction())) return;
+        if (Prefs.get(c, Prefs.ON) && Prefs.get(c, Prefs.BOOT)) {
             c.startForegroundService(new Intent(c, RingService.class));
         }
     }
