@@ -36,7 +36,7 @@ final class Proto {
     }
 
     static byte[] regenerate(Context c) {
-        byte[] k = random(20);
+        byte[] k = random(16);
         prefs(c).edit().putString("k", Base64.encodeToString(k, Base64.NO_WRAP)).apply();
         return k;
     }
