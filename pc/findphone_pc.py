@@ -55,7 +55,7 @@ def load_key():
 def parse_code(text: str) -> bytes:
     s = "".join(ch for ch in text.upper() if ch.isalnum())
     key = base64.b32decode(s + "=" * (-len(s) % 8))
-    if len(key) not in (16, 20)  # 16=現行 / 20=旧版アプリ:
+    if len(key) not in (16, 20):
         raise ValueError("length")
     return key
 
