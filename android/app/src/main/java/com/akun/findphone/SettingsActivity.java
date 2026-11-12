@@ -44,6 +44,8 @@ public class SettingsActivity extends LocalizedActivity {
         general.addView(toggleRow(R.string.start_on_boot, 0, Prefs.BOOT));
         general.addView(Ui.row(this, getString(R.string.language), Lang.NAMES[Lang.currentIndex(this)],
                 Ui.chevron(this), v -> pickLanguage()));
+        general.addView(toggleRow(R.string.auto_update, 0, Updater.PREF_AUTO));
+        general.addView(Ui.row(this, getString(R.string.check_update), null, null, v -> checkUpdate()));
         general.addView(Ui.row(this, getString(R.string.regenerate), getString(R.string.regenerate_desc),
                 null, v -> confirmRegenerate()));
         content.addView(general);
@@ -147,6 +149,13 @@ public class SettingsActivity extends LocalizedActivity {
         } catch (Exception e) {
             AppLog.add(getString(R.string.log_error, e.toString()));
         }
+    }
+
+    private void checkUpdate() {
+        Updater.check(this, release -> {
+            if (release != null) MainActivity.offerUpdate(this, release);
+            else Toast.makeText(this, R.string.up_to_date, Toast.LENGTH_SHORT).show();
+        });
     }
 
     private void confirmRegenerate() {

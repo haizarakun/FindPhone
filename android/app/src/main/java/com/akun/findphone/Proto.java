@@ -31,6 +31,7 @@ final class Proto {
     static final int PORT = 47321;
     private static final SecureRandom RNG = new SecureRandom();
     private static final String B32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+    private static final String QR_PREFIX = "FINDPHONE1:";
 
     private Proto() {}
 
@@ -56,6 +57,22 @@ final class Proto {
 
     static synchronized void regenerate(Context c) {
         byte[] k = random(16);
+        store(c, k);
+        cachedKey = k;
+    }
+
+    /**
+     * PCが表示したQRコードの内容から鍵を取り出す。形式が違えば null。
+     * 形式: "FINDPHONE1:" + Base32(鍵16バイト)
+     */
+    static byte[] keyFromQr(String text) {
+        if (text == null || !text.startsWith(QR_PREFIX)) return null;
+        byte[] k = fromBase32(text.substring(QR_PREFIX.length()));
+        return k != null && k.length == 16 ? k : null;
+    }
+
+    /** QRで受け取った鍵に置き換える(以前のペアリングは無効になる)。 */
+    static synchronized void importKey(Context c, byte[] k) {
         store(c, k);
         cachedKey = k;
     }
@@ -163,6 +180,23 @@ final class Proto {
         StringBuilder s = new StringBuilder();
         for (byte x : b) s.append(String.format("%02x", x));
         return s.toString();
+    }
+
+    /** Base32を戻す。使えない文字があれば null。 */
+    private static byte[] fromBase32(String s) {
+        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+        int buf = 0, bits = 0;
+        for (char ch : s.trim().toUpperCase(java.util.Locale.US).toCharArray()) {
+            int v = B32.indexOf(ch);
+            if (v < 0) return null;
+            buf = ((buf << 5) | v) & 0xFFFF;
+            bits += 5;
+            if (bits >= 8) {
+                out.write((buf >> (bits - 8)) & 255);
+                bits -= 8;
+            }
+        }
+        return out.toByteArray();
     }
 
     private static String base32(byte[] d) {

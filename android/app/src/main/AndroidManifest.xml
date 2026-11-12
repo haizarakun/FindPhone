@@ -13,6 +13,10 @@
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.CAMERA" />
+
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
 
     <application
         android:allowBackup="false"
@@ -32,6 +36,10 @@
         <activity android:name=".SettingsActivity" android:exported="false" />
         <activity android:name=".HelpActivity" android:exported="false" />
         <activity
+            android:name=".ScanActivity"
+            android:exported="false"
+            android:screenOrientation="portrait" />
+        <activity
             android:name=".RingActivity"
             android:excludeFromRecents="true"
             android:exported="false"
@@ -48,6 +56,8 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="LAN listener that rings a lost phone on request from a paired PC" />
         </service>
+
+        <receiver android:name=".InstallReceiver" android:exported="false" />
 
         <receiver
             android:name=".BootReceiver"

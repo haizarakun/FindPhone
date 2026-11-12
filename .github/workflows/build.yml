@@ -52,7 +52,7 @@ jobs:
           python-version: '3.12'
       - name: Test protocol
         run: python pc/test_protocol.py
-      - run: pip install pyinstaller
+      - run: pip install pyinstaller qrcode
       # 使わない標準モジュール(OpenSSLなど)を外してexeを小さく・起動を速くする
       - name: Build
         run: >

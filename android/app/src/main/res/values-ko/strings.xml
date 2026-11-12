@@ -69,4 +69,19 @@
     <string name="ring_title">여기 있어요!</string>
     <string name="ring_stop">중지</string>
     <string name="back">뒤로</string>
+    <string name="pair_by_qr">PC의 QR 코드 스캔</string>
+    <string name="scan_hint">PC 앱에 표시된 QR 코드(페어링 → QR 코드 표시)에 카메라를 맞추세요</string>
+    <string name="camera_needed">QR 코드를 스캔하려면 카메라 권한이 필요합니다</string>
+    <string name="qr_confirm">이 PC와 페어링할까요? 이전 페어링은 대체됩니다.</string>
+    <string name="qr_paired">PC와 페어링했습니다</string>
+    <string name="qr_invalid">Find Phone QR 코드가 아닙니다</string>
+    <string name="update_title">업데이트가 있습니다</string>
+    <string name="update_message">버전 %1$s을(를) 사용할 수 있습니다. 지금 업데이트할까요?</string>
+    <string name="update_now">업데이트</string>
+    <string name="update_later">나중에</string>
+    <string name="update_downloading">업데이트 다운로드 중…</string>
+    <string name="update_failed">업데이트에 실패했습니다</string>
+    <string name="auto_update">업데이트 자동 확인</string>
+    <string name="check_update">업데이트 확인</string>
+    <string name="up_to_date">최신 버전입니다</string>
 </resources>

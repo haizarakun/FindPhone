@@ -69,4 +69,19 @@
     <string name="ring_title">Hier bin ich!</string>
     <string name="ring_stop">STOPP</string>
     <string name="back">Zurück</string>
+    <string name="pair_by_qr">QR-Code am PC scannen</string>
+    <string name="scan_hint">Richte die Kamera auf den QR-Code in der PC-App (Koppeln → QR-Code anzeigen)</string>
+    <string name="camera_needed">Zum Scannen des QR-Codes wird die Kameraberechtigung benötigt</string>
+    <string name="qr_confirm">Mit diesem PC koppeln? Die bisherige Kopplung wird ersetzt.</string>
+    <string name="qr_paired">Mit dem PC gekoppelt</string>
+    <string name="qr_invalid">Das ist kein Find-Phone-QR-Code</string>
+    <string name="update_title">Update verfügbar</string>
+    <string name="update_message">Version %1$s ist verfügbar. Jetzt aktualisieren?</string>
+    <string name="update_now">Aktualisieren</string>
+    <string name="update_later">Später</string>
+    <string name="update_downloading">Update wird heruntergeladen…</string>
+    <string name="update_failed">Update fehlgeschlagen</string>
+    <string name="auto_update">Automatisch nach Updates suchen</string>
+    <string name="check_update">Nach Updates suchen</string>
+    <string name="up_to_date">Du hast die neueste Version</string>
 </resources>

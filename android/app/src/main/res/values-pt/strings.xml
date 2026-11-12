@@ -69,4 +69,19 @@
     <string name="ring_title">Estou aqui!</string>
     <string name="ring_stop">PARAR</string>
     <string name="back">Voltar</string>
+    <string name="pair_by_qr">Ler o código QR do PC</string>
+    <string name="scan_hint">Aponte a câmera para o código QR mostrado no app do PC (Parear → Mostrar código QR)</string>
+    <string name="camera_needed">A permissão da câmera é necessária para ler o código QR</string>
+    <string name="qr_confirm">Parear com este PC? O pareamento anterior será substituído.</string>
+    <string name="qr_paired">Pareado com o PC</string>
+    <string name="qr_invalid">Este não é um código QR do Find Phone</string>
+    <string name="update_title">Atualização disponível</string>
+    <string name="update_message">A versão %1$s está disponível. Atualizar agora?</string>
+    <string name="update_now">Atualizar</string>
+    <string name="update_later">Depois</string>
+    <string name="update_downloading">Baixando a atualização…</string>
+    <string name="update_failed">Falha na atualização</string>
+    <string name="auto_update">Verificar atualizações automaticamente</string>
+    <string name="check_update">Verificar atualizações</string>
+    <string name="up_to_date">Você tem a versão mais recente</string>
 </resources>

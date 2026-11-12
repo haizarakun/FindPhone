@@ -1,6 +1,8 @@
 package com.akun.findphone;
 
 import android.Manifest;
+import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -15,9 +17,11 @@ import android.view.WindowManager;
 import android.widget.LinearLayout;
 import android.widget.Switch;
 import android.widget.TextView;
+import android.widget.Toast;
 
 /** ホーム画面: 待受の状態・ペアリングコード・テスト鳴動。 */
 public class MainActivity extends LocalizedActivity {
+    private static final int REQ_SCAN = 1;
     private static final String HIDDEN_CODE = "•••• •••• ••••";
 
     private final Handler ui = new Handler(Looper.getMainLooper());
@@ -68,6 +72,9 @@ public class MainActivity extends LocalizedActivity {
     protected void onResume() {
         super.onResume();
         ui.post(tick);
+        Updater.checkIfDue(this, release -> {
+            if (release != null) offerUpdate(this, release);
+        });
     }
 
     @Override
@@ -136,6 +143,8 @@ public class MainActivity extends LocalizedActivity {
         half2.setMarginStart(Ui.dp(this, 8));
         buttons.addView(share, half2);
         card.addView(buttons, Ui.margins(this, 12));
+        card.addView(Ui.button(this, getString(R.string.pair_by_qr), false,
+                v -> startActivityForResult(new Intent(this, ScanActivity.class), REQ_SCAN)), Ui.margins(this, 8));
         return card;
     }
 
@@ -175,6 +184,45 @@ public class MainActivity extends LocalizedActivity {
         Intent send = new Intent(Intent.ACTION_SEND).setType("text/plain")
                 .putExtra(Intent.EXTRA_TEXT, Proto.pairCode(this));
         startActivity(Intent.createChooser(send, getString(R.string.share_chooser)));
+    }
+
+    // ---- QRコードでのペアリング ----
+
+    @Override
+    protected void onActivityResult(int request, int result, Intent data) {
+        if (request != REQ_SCAN || result != RESULT_OK || data == null) return;
+        byte[] key = Proto.keyFromQr(data.getStringExtra(ScanActivity.EXTRA_TEXT));
+        if (key == null) {
+            Toast.makeText(this, R.string.qr_invalid, Toast.LENGTH_LONG).show();
+            return;
+        }
+        new AlertDialog.Builder(this)
+                .setMessage(R.string.qr_confirm)
+                .setPositiveButton(R.string.ok, (dialog, which) -> {
+                    Proto.importKey(this, key);
+                    showCode(false);
+                    Toast.makeText(this, R.string.qr_paired, Toast.LENGTH_LONG).show();
+                })
+                .setNegativeButton(R.string.cancel, null)
+                .show();
+    }
+
+    // ---- アップデート ----
+
+    /** 新しい版の案内を出す(設定画面の「アップデートを確認」からも使う)。 */
+    static void offerUpdate(Activity a, Updater.Release release) {
+        if (a.isFinishing() || a.isDestroyed()) return;
+        new AlertDialog.Builder(a)
+                .setTitle(R.string.update_title)
+                .setMessage(a.getString(R.string.update_message, release.version))
+                .setPositiveButton(R.string.update_now, (dialog, which) -> {
+                    Toast.makeText(a, R.string.update_downloading, Toast.LENGTH_LONG).show();
+                    Updater.install(a, release, ok -> {
+                        if (!ok) Toast.makeText(a, R.string.update_failed, Toast.LENGTH_LONG).show();
+                    });
+                })
+                .setNegativeButton(R.string.update_later, null)
+                .show();
     }
 
     private void openHelp() {

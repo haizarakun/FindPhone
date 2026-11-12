@@ -10,9 +10,11 @@ import base64
 import hashlib
 import hmac
 import ipaddress
+import json
 import os
 import select
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -21,14 +23,20 @@ try:
     import tkinter as tk
 except ImportError:  # 画面なしの環境(通信部分のテスト用)
     tk = None
+try:
+    import qrcode
+except ImportError:  # 無くても動く(QRでのペアリングだけ使えなくなる)
+    qrcode = None
 
 APP_NAME = "FindPhone"
-VERSION = "1.00"
+VERSION = "1.01"
 PORT = 47321
 APP_DIR = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), APP_NAME)
 KEY_FILE = os.path.join(APP_DIR, "key.bin")
 LAST_IP_FILE = os.path.join(APP_DIR, "last_ip.txt")
 LANG_FILE = os.path.join(APP_DIR, "lang.txt")
+LATEST_RELEASE_API = "https://api.github.com/repos/haizarakun/FindPhone/releases/latest"
+QR_PREFIX = "FINDPHONE1:"  # スマホアプリが読み取るQRコードの先頭
 
 LINK_CHECK_INTERVAL = 3.0   # 接続確認の間隔(秒)
 SWEEP_EVERY_FAILS = 5       # 接続確認がこの回数続けて失敗したら、全端末へ探索を送る
@@ -52,7 +60,8 @@ LANGUAGES = {  # 言語コード -> (言語名, 文字が正しく出るフォ�
 
 _UI_KEYS = ("title ring stop pair show_log hide_log language link_checking link_ok link_ng link_unpaired "
             "msg_ready msg_unpaired msg_searching msg_ringing msg_stopped msg_not_found msg_paired "
-            "pair_prompt pair_bad pair_save_failed ok cancel").split()
+            "pair_prompt pair_bad pair_save_failed ok cancel "
+            "show_qr qr_hint qr_waiting update_available updating update_failed").split()
 
 _UI = {
     "ja": "スマホ探し|鳴らす|止める|ペアリング|ログを表示|ログを隠す|言語|確認中…|接続中  {ip}|未接続|未ペアリング|"
@@ -106,7 +115,19 @@ _UI = {
           "Не найден. Откройте «Справку» на телефоне для диагностики|Сопряжено|"
           "Введите код сопряжения с экрана телефона|Неверный код|Не удалось сохранить ключ: {e}|ОК|Отмена",
 }
-TEXTS = {code: dict(zip(_UI_KEYS, blob.split("|"))) for code, blob in _UI.items()}
+_UI_MORE = {  # QRペアリングとアップデートの文言
+    "ja": "QRコードを表示|スマホアプリの「PCのQRコードを読み取る」で読み取ってください|スマホを待っています…|v{v} に更新|更新しています…|更新に失敗しました",
+    "en": "Show QR code|Scan it with “Scan the QR code on the PC” in the phone app|Waiting for the phone…|Update to v{v}|Updating…|Update failed",
+    "zh-CN": "显示二维码|请用手机应用的“扫描电脑上的二维码”扫描|正在等待手机…|更新到 v{v}|正在更新…|更新失败",
+    "zh-TW": "顯示 QR 碼|請用手機應用程式的「掃描電腦上的 QR 碼」掃描|正在等待手機…|更新至 v{v}|正在更新…|更新失敗",
+    "ko": "QR 코드 표시|폰 앱의 ‘PC의 QR 코드 스캔’으로 스캔하세요|폰을 기다리는 중…|v{v}(으)로 업데이트|업데이트 중…|업데이트에 실패했습니다",
+    "es": "Mostrar código QR|Escanéalo con «Escanear el código QR del PC» en la app del teléfono|Esperando al teléfono…|Actualizar a v{v}|Actualizando…|Error al actualizar",
+    "fr": "Afficher le code QR|Scannez-le avec « Scanner le code QR du PC » dans l’application du téléphone|En attente du téléphone…|Mettre à jour vers v{v}|Mise à jour…|Échec de la mise à jour",
+    "de": "QR-Code anzeigen|Scanne ihn mit „QR-Code am PC scannen“ in der Handy-App|Warte auf das Handy…|Auf v{v} aktualisieren|Aktualisiere…|Update fehlgeschlagen",
+    "pt": "Mostrar código QR|Leia com “Ler o código QR do PC” no app do telefone|Aguardando o telefone…|Atualizar para v{v}|Atualizando…|Falha na atualização",
+    "ru": "Показать QR-код|Отсканируйте его через «Сканировать QR-код на ПК» в приложении на телефоне|Ожидание телефона…|Обновить до v{v}|Обновление…|Не удалось обновить",
+}
+TEXTS = {code: dict(zip(_UI_KEYS, (blob + "|" + _UI_MORE[code]).split("|"))) for code, blob in _UI.items()}
 assert all(len(v) == len(_UI_KEYS) for v in TEXTS.values())
 
 TEXTS["ja"].update({
@@ -343,6 +364,76 @@ def find_phone(key: bytes, cmd=None, timeout: float = 5.0, last_ip=None, sweep_a
             s.close()
 
 
+# ---- アップデート ----
+# HTTPSの通信は Windows 標準の curl.exe に任せる(exeにOpenSSLを同梱せずに済み、証明書の検証もOS任せにできる)。
+
+def _curl(*args, timeout=60) -> bytes:
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)  # 黒い窓を出さない
+    exe = "curl.exe" if os.name == "nt" else "curl"
+    done = subprocess.run([exe, "-sSL", "--fail", "--proto", "=https", "--max-time", str(timeout),
+                           "-A", "FindPhone-PC", *args],
+                          capture_output=True, timeout=timeout + 10, creationflags=flags)
+    if done.returncode != 0:
+        raise OSError(f"curl failed ({done.returncode})")
+    return done.stdout
+
+
+def is_newer(candidate: str, current: str) -> bool:
+    """ "1.01" と "1.00" のようなバージョンを、区切りごとの数値で比べる。"""
+    def numbers(v):
+        return [int(part) if part.isdigit() else 0 for part in v.split(".")]
+    a, b = numbers(candidate), numbers(current)
+    width = max(len(a), len(b))
+    return a + [0] * (width - len(a)) > b + [0] * (width - len(b))
+
+
+def check_update():
+    """新しい版があれば (バージョン, exeのURL, SHA-256) を返す。無ければ None。"""
+    try:
+        release = json.loads(_curl(LATEST_RELEASE_API, timeout=15))
+        version = release["tag_name"].lstrip("v")
+        if not is_newer(version, VERSION):
+            return None
+        for asset in release["assets"]:
+            digest = asset.get("digest") or ""
+            url = asset.get("browser_download_url", "")
+            # 照合用のSHA-256が公開されているexeだけを対象にする
+            if asset["name"].endswith(".exe") and url.startswith("https://github.com/") \
+                    and digest.startswith("sha256:"):
+                return version, url, digest[7:].lower()
+    except Exception:
+        pass  # オフライン・未公開などは「更新なし」として扱う
+    return None
+
+
+def apply_update(url: str, sha256: str) -> None:
+    """新しいexeをダウンロードして照合し、今のexeと入れ替えて起動し直す。失敗時は例外。"""
+    if not getattr(sys, "frozen", False):
+        raise OSError("not running as exe")
+    exe = sys.executable
+    new, old = exe + ".new", exe + ".old"
+    data = _curl(url, timeout=300)
+    if hashlib.sha256(data).hexdigest() != sha256:
+        raise OSError("checksum mismatch")
+    with open(new, "wb") as f:
+        f.write(data)
+    if os.path.exists(old):
+        os.remove(old)
+    os.replace(exe, old)  # 実行中のexeは消せないが、名前の変更はできる
+    os.replace(new, exe)
+    subprocess.Popen([exe, "--updated"], close_fds=True)
+    os._exit(0)
+
+
+def _remove_old_exe() -> None:
+    """アップデートで残った1つ前のexeを消す。"""
+    if getattr(sys, "frozen", False):
+        try:
+            os.remove(sys.executable + ".old")
+        except OSError:
+            pass
+
+
 # ---- Windows向けの下ごしらえ ----
 
 def _resource(name: str) -> str:
@@ -354,9 +445,10 @@ def _already_running() -> bool:
     """二重起動なら、既に開いているウィンドウを前面に出して True を返す。"""
     try:
         import ctypes
-        ctypes.windll.kernel32.CreateMutexW(None, False, "Local\\FindPhonePC")
+        handle = ctypes.windll.kernel32.CreateMutexW(None, False, "Local\\FindPhonePC")
         if ctypes.windll.kernel32.GetLastError() != 183:  # ERROR_ALREADY_EXISTS
             return False
+        ctypes.windll.kernel32.CloseHandle(handle)
         for texts in TEXTS.values():  # ウィンドウ名は表示言語で変わるので全言語で探す
             hwnd = ctypes.windll.user32.FindWindowW(None, texts["title"])
             if hwnd:
@@ -407,11 +499,13 @@ class App:
         self.busy = False
         self.log_visible = False
         self._link_state = None
+        self.update = None  # 新しい版が見つかったら (バージョン, URL, SHA-256)
 
         self._build()
         self.log(tr("log_start", v=VERSION))
         self._set_link(None)
         threading.Thread(target=self._watch_link, daemon=True).start()
+        threading.Thread(target=self._check_update, daemon=True).start()
 
     def px(self, value: float) -> int:
         return round(value * self.scale)
@@ -445,7 +539,9 @@ class App:
         self._button(row, tr("stop"), lambda: self.run(b"S")).pack(side="left", padx=self.px(4))
         self._button(row, tr("pair"), self.pair).pack(side="left", padx=self.px(4))
 
-        links = tk.Frame(root, bg=BG)
+        self.update_link = tk.Label(root, text="", fg=ACCENT, bg=BG, font=(FONT, 10, "bold"), cursor="hand2")
+        self.update_link.bind("<Button-1>", lambda e: self._start_update())
+        self.links = links = tk.Frame(root, bg=BG)
         links.pack(pady=(self.px(14), self.px(12)))
         self.log_toggle = tk.Label(links, text=tr("show_log"), fg=SUB, bg=BG, font=(FONT, 9), cursor="hand2")
         self.log_toggle.pack(side="left", padx=self.px(10))
@@ -462,6 +558,38 @@ class App:
         root.minsize(self.px(320), 0)
         self.log_visible = False
         self.show(tr("msg_unpaired") if self.key is None else tr("msg_ready"))
+        self._show_update_link()
+
+    # ---- アップデート ----
+
+    def _check_update(self):
+        found = check_update()
+        if found:
+            self.update = found
+            self.root.after(0, self._show_update_link)
+
+    def _show_update_link(self):
+        if self.update:
+            self.update_link.config(text=tr("update_available", v=self.update[0]))
+            self.update_link.pack(before=self.links, pady=(self.px(12), 0))
+
+    def _start_update(self):
+        if self.busy or not self.update:
+            return
+        self.busy = True
+        self.update_link.config(text=tr("updating"))
+        threading.Thread(target=self._update_worker, daemon=True).start()
+
+    def _update_worker(self):
+        try:
+            apply_update(self.update[1], self.update[2])  # 成功するとここで新しい版に切り替わる
+        except Exception as e:
+            self.log(f"{tr('update_failed')}: {e}")
+            self.root.after(0, self._update_failed)
+
+    def _update_failed(self):
+        self.busy = False
+        self.update_link.config(text=tr("update_failed"))
 
     # ---- 言語 ----
 
@@ -633,10 +761,78 @@ class App:
         row.pack(pady=self.px(14))
         self._button(row, tr("ok"), accept).pack(side="left", padx=self.px(4))
         self._button(row, tr("cancel"), dialog.destroy).pack(side="left", padx=self.px(4))
+        if qrcode is not None:
+            def use_qr():
+                dialog.destroy()
+                self.pair_by_qr()
+            qr_link = tk.Label(dialog, text=tr("show_qr"), fg=ACCENT, bg=BG, font=(FONT, 10), cursor="hand2")
+            qr_link.pack(pady=(0, self.px(14)))
+            qr_link.bind("<Button-1>", lambda e: use_qr())
         entry.bind("<Return>", accept)
         dialog.bind("<Escape>", lambda e: dialog.destroy())
         dialog.grab_set()
         entry.focus_set()
+        return dialog
+
+    def pair_by_qr(self):
+        """新しい鍵をQRコードで表示し、スマホが読み取って応答したらその鍵を採用する。"""
+        candidate = os.urandom(16)
+        code = base64.b32encode(candidate).decode("ascii").rstrip("=")
+        qr = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_M, border=4)
+        qr.add_data(QR_PREFIX + code)
+        qr.make(fit=True)
+        matrix = qr.get_matrix()
+
+        dialog = tk.Toplevel(self.root)
+        dialog.title(tr("pair"))
+        dialog.configure(bg=BG)
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+
+        cell = max(2, self.px(240) // len(matrix))
+        size = cell * len(matrix)
+        canvas = tk.Canvas(dialog, width=size, height=size, bg="white", highlightthickness=0)
+        canvas.pack(padx=self.px(18), pady=(self.px(18), self.px(10)))
+        for y, line in enumerate(matrix):
+            for x, dark in enumerate(line):
+                if dark:
+                    canvas.create_rectangle(x * cell, y * cell, (x + 1) * cell, (y + 1) * cell,
+                                            fill="black", outline="")
+        tk.Label(dialog, text=tr("qr_hint"), fg=TEXT, bg=BG, font=(FONT, 10), wraplength=size).pack(
+            padx=self.px(18))
+        tk.Label(dialog, text=tr("qr_waiting"), fg=SUB, bg=BG, font=(FONT, 9)).pack(pady=(self.px(6), 0))
+        self._button(dialog, tr("cancel"), dialog.destroy).pack(pady=self.px(14))
+        dialog.bind("<Escape>", lambda e: dialog.destroy())
+        dialog.grab_set()
+
+        closed = threading.Event()
+        dialog.bind("<Destroy>", lambda e: closed.set() if e.widget is dialog else None)
+
+        def paired(ip):
+            if closed.is_set():
+                return
+            try:
+                save_key(candidate)
+            except OSError as e:
+                self.show(tr("pair_save_failed", e=e), BAD)
+                dialog.destroy()
+                return
+            self.key = candidate
+            self._remember(ip)
+            self._link_state = ip
+            dialog.destroy()
+            self.show(tr("msg_paired"), ACCENT)
+            self.log(tr("msg_paired"))
+            self._set_link(ip)
+
+        def wait_for_phone():  # スマホが新しい鍵で応答するまで探し続ける
+            while not closed.is_set():
+                ip = find_phone(candidate, None, timeout=2.0, last_ip=self.last_ip, sweep_after=1.0)
+                if ip:
+                    self.root.after(0, paired, ip)
+                    return
+
+        threading.Thread(target=wait_for_phone, daemon=True).start()
         return dialog
 
     def _clipboard(self) -> str:
@@ -668,6 +864,10 @@ def _selftest() -> int:
             app.change_language(code)
         app.toggle_log()
         app.pair().destroy()
+        if qrcode is not None:
+            app.pair_by_qr().destroy()
+        assert qrcode is not None, "qrcode module missing from the build"
+        assert is_newer("1.02", "1.01") and is_newer("2.0", "1.99") and not is_newer("1.01", "1.01")
         app.root.update()
         app.root.destroy()
         return 0
@@ -679,5 +879,12 @@ if __name__ == "__main__":
     if "--selftest" in sys.argv:
         os._exit(_selftest())
     _enable_hidpi()
-    if not _already_running():
+    _remove_old_exe()
+    if "--updated" in sys.argv:  # 更新直後は、古い方のプロセスが終わるまで少し待つ
+        for _ in range(50):
+            if not _already_running():
+                break
+            time.sleep(0.1)
+        App().start()
+    elif not _already_running():
         App().start()

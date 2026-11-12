@@ -69,4 +69,19 @@
     <string name="ring_title">Я здесь!</string>
     <string name="ring_stop">СТОП</string>
     <string name="back">Назад</string>
+    <string name="pair_by_qr">Сканировать QR-код на ПК</string>
+    <string name="scan_hint">Наведите камеру на QR-код в приложении на ПК (Сопряжение → Показать QR-код)</string>
+    <string name="camera_needed">Для сканирования QR-кода нужен доступ к камере</string>
+    <string name="qr_confirm">Выполнить сопряжение с этим ПК? Прежнее сопряжение будет заменено.</string>
+    <string name="qr_paired">Сопряжено с ПК</string>
+    <string name="qr_invalid">Это не QR-код Find Phone</string>
+    <string name="update_title">Доступно обновление</string>
+    <string name="update_message">Доступна версия %1$s. Обновить сейчас?</string>
+    <string name="update_now">Обновить</string>
+    <string name="update_later">Позже</string>
+    <string name="update_downloading">Загрузка обновления…</string>
+    <string name="update_failed">Не удалось обновить</string>
+    <string name="auto_update">Автоматически проверять обновления</string>
+    <string name="check_update">Проверить обновления</string>
+    <string name="up_to_date">У вас последняя версия</string>
 </resources>

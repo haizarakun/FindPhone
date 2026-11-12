@@ -69,4 +69,19 @@
     <string name="ring_title">Je suis là !</string>
     <string name="ring_stop">ARRÊTER</string>
     <string name="back">Retour</string>
+    <string name="pair_by_qr">Scanner le code QR du PC</string>
+    <string name="scan_hint">Dirigez la caméra vers le code QR affiché dans l\'application PC (Associer → Afficher le code QR)</string>
+    <string name="camera_needed">L\'autorisation de la caméra est nécessaire pour scanner le code QR</string>
+    <string name="qr_confirm">Associer à ce PC ? L\'association précédente sera remplacée.</string>
+    <string name="qr_paired">Associé au PC</string>
+    <string name="qr_invalid">Ce n\'est pas un code QR Find Phone</string>
+    <string name="update_title">Mise à jour disponible</string>
+    <string name="update_message">La version %1$s est disponible. Mettre à jour maintenant ?</string>
+    <string name="update_now">Mettre à jour</string>
+    <string name="update_later">Plus tard</string>
+    <string name="update_downloading">Téléchargement de la mise à jour…</string>
+    <string name="update_failed">Échec de la mise à jour</string>
+    <string name="auto_update">Rechercher les mises à jour automatiquement</string>
+    <string name="check_update">Rechercher les mises à jour</string>
+    <string name="up_to_date">Vous avez la dernière version</string>
 </resources>

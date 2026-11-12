@@ -31,6 +31,9 @@ Both are available from [Releases](../../releases).
 2. Enter the code in "Pair" on the PC app and press OK. If the code is on the clipboard, it is filled in automatically.
 3. Pairing is complete when the top of the PC app shows a green "Connected".
 
+You can also pair with a QR code: choose "Pair" → "Show QR code" in the PC app,
+then scan it with "Scan the QR code on the PC" in the phone app (camera permission required).
+
 ### 4. Use
 
 - Press the round button on the PC app to ring the phone. `Enter` = ring / `Esc` = stop.
@@ -38,6 +41,13 @@ Both are available from [Releases](../../releases).
 - Sound, duration, screen flash, flashlight and vibration can be changed in the phone's "Settings".
 
 The PC and the phone must be connected to the same router (a guest Wi-Fi will not work).
+
+## Updates
+
+When a new version is released, the phone app offers it on launch and the PC app shows an update link at the bottom.
+Both update with one tap. Downloaded files are checked against their SHA-256,
+and on the phone the OS rejects any APK whose signature does not match.
+Only the releases of this GitHub repository are contacted. Automatic checks on the phone can be turned off in "Settings".
 
 ## Troubleshooting
 
