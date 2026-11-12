@@ -40,12 +40,11 @@ then scan it with "Scan the QR code on the PC" in the phone app (camera permissi
 - On the phone, stop with the "STOP" button on screen or the "Stop" action in the notification. Ringing stops automatically after the set duration (90 seconds by default).
 - Sound, duration, screen flash, flashlight and vibration can be changed in the phone's "Settings".
 
-- The PC app starts with Windows and stays in the notification area (system tray) at the bottom right of the taskbar.
+- The PC app stays in the notification area (system tray) at the bottom right of the taskbar.
   Closing the window keeps it in the tray. Click the icon to open it; right-click to ring, stop,
-  turn "Start with Windows" on or off, or exit. The same switch is at the bottom of the window.
-- When the app runs as administrator, Windows refuses to start it from the startup list,
-  so it is registered as a scheduled task instead. Administrator rights are not needed;
-  running it normally is recommended.
+  turn "Start with Windows" on or off, or exit.
+- To start it automatically with Windows, turn on "Start with Windows" at the bottom of the window.
+  Windows asks for administrator approval when you turn it on. Turn it off in the same place.
 
 The PC and the phone must be connected to the same router (a guest Wi-Fi will not work).
 

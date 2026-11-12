@@ -35,7 +35,6 @@ APP_DIR = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), APP_N
 KEY_FILE = os.path.join(APP_DIR, "key.bin")
 LAST_IP_FILE = os.path.join(APP_DIR, "last_ip.txt")
 LANG_FILE = os.path.join(APP_DIR, "lang.txt")
-AUTOSTART_FLAG_FILE = os.path.join(APP_DIR, "autostart_configured.txt")
 LATEST_RELEASE_API = "https://api.github.com/repos/haizarakun/FindPhone/releases/latest"
 QR_PREFIX = "FINDPHONE1:"  # スマホアプリが読み取るQRコードの先頭
 
@@ -480,14 +479,6 @@ _RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 _TASK_NAME = APP_NAME  # タスクスケジューラに登録する名前
 
 
-def _is_admin() -> bool:
-    try:
-        import ctypes
-        return bool(ctypes.windll.shell32.IsUserAnAdmin())
-    except Exception:
-        return False
-
-
 def _run_hidden(args) -> int:
     """黒い窓を出さずにコマンドを実行し、終了コードを返す。"""
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -502,8 +493,8 @@ def _autostart_command() -> str:
     return f'"{sys.executable}" --tray'
 
 
-# 登録先は2通り。管理者権限を要求するexeはスタートアップ(レジストリ)からは起動できないため、
-# その場合だけタスクスケジューラ(管理者として実行)に登録する。
+# 自動起動はタスクスケジューラに登録する(管理者権限で起動されるexeでも確実に始まる)。
+# レジストリの関数は、以前の版が作ったスタートアップ登録を消すために残している。
 
 def _registry_autostart(enabled: bool) -> bool:
     try:
@@ -531,12 +522,32 @@ def _registry_autostart_enabled() -> bool:
         return False
 
 
-def _task_autostart(enabled: bool) -> bool:
+def _schtasks_arguments(enabled: bool) -> str:
     if not enabled:
-        _run_hidden(["schtasks", "/Delete", "/TN", _TASK_NAME, "/F"])
+        return f'/Delete /TN {_TASK_NAME} /F'
+    # ログオン時に「最上位の特権」で起動するタスク。exeのパスは空白を含んでもよいよう引用符で囲む
+    return (f'/Create /TN {_TASK_NAME} /TR "\\"{sys.executable}\\" --tray" '
+            f'/SC ONLOGON /RL HIGHEST /F')
+
+
+def _task_autostart(enabled: bool) -> bool:
+    """タスクスケジューラへの登録/解除。管理者でなければ、Windowsの確認画面(UAC)を出して昇格する。"""
+    if not enabled and not _task_autostart_enabled():
         return True
-    return _run_hidden(["schtasks", "/Create", "/TN", _TASK_NAME, "/TR", _autostart_command(),
-                        "/SC", "ONLOGON", "/RL", "HIGHEST", "/F"]) == 0
+    try:
+        import ctypes
+        # "runas" を指定すると、管理者でない時はUACの確認画面が出る(管理者ならそのまま実行される)
+        launched = ctypes.windll.shell32.ShellExecuteW(
+            None, "runas", "schtasks.exe", _schtasks_arguments(enabled), None, 0)
+    except Exception:
+        return False
+    if launched <= 32:  # 確認画面で「いいえ」を選んだ場合など
+        return False
+    for _ in range(40):  # 別プロセスで実行されるので、結果が反映されるまで最大10秒待つ
+        if _task_autostart_enabled() == enabled:
+            return True
+        time.sleep(0.25)
+    return False
 
 
 def _task_autostart_enabled() -> bool:
@@ -544,38 +555,19 @@ def _task_autostart_enabled() -> bool:
 
 
 def autostart_enabled() -> bool:
-    return _registry_autostart_enabled() or _task_autostart_enabled()
+    return _task_autostart_enabled() or _registry_autostart_enabled()
 
 
 def set_autostart(enabled: bool) -> bool:
-    """ログイン時の自動起動を登録/解除する。登録できたら True。"""
+    """ログイン時の自動起動を登録/解除する。成功したら True。
+
+    登録には管理者権限を使う(オンにする時にWindowsの確認画面が出る)。
+    時間がかかることがあるので、画面を固めないよう別スレッドから呼ぶこと。
+    """
     if not getattr(sys, "frozen", False):
         return False  # exeとして動いている時だけ登録する
-    if not enabled:
-        _registry_autostart(False)
-        _task_autostart(False)
-        return True
-    if _is_admin():
-        # 管理者として起動しているなら、同じ権限で起動し直せるタスクとして登録する
-        if _task_autostart(True):
-            _registry_autostart(False)  # 二重起動を避けるため、古い登録は消す
-            return True
-    _task_autostart(False)
-    return _registry_autostart(True)
-
-
-def setup_autostart() -> None:
-    """初回だけ自動起動をオンにする。以降は利用者の選択を尊重し、登録済みなら場所と方式だけ更新する。"""
-    if not os.path.exists(AUTOSTART_FLAG_FILE):
-        set_autostart(True)
-        try:
-            os.makedirs(APP_DIR, exist_ok=True)
-            with open(AUTOSTART_FLAG_FILE, "w", encoding="ascii") as f:
-                f.write("1")
-        except OSError:
-            pass
-    elif autostart_enabled():
-        set_autostart(True)
+    _registry_autostart(False)  # 旧方式(スタートアップ)の登録が残っていれば消す
+    return _task_autostart(enabled)
 
 
 # ---- 通知領域(タスクバー右下)のアイコン ----
@@ -868,12 +860,17 @@ class App:
     # ---- 自動起動 ----
 
     def _show_autostart(self):
+        if not self.autostart_label.winfo_exists():  # 言語切り替えで画面を作り直した直後
+            return
         state = tr("on") if autostart_enabled() else tr("off")
         self.autostart_label.config(text=f"{tr('autostart')}: {state}")
 
     def toggle_autostart(self):
-        set_autostart(not autostart_enabled())
-        self._show_autostart()
+        """オン/オフを切り替える。確認画面への応答を待つ間、画面が固まらないよう別スレッドで行う。"""
+        def work():
+            set_autostart(not autostart_enabled())
+            self.root.after(0, self._show_autostart)
+        threading.Thread(target=work, daemon=True).start()
 
     # ---- アップデート ----
 
@@ -1180,7 +1177,6 @@ def _selftest() -> int:
         for code in LANGUAGES:  # 全言語で画面を組み立てられることを確認
             app.change_language(code)
         app.toggle_log()
-        app.toggle_autostart()  # exeでない時は何も登録されない
         app.pair().destroy()
         if qrcode is not None:
             app.pair_by_qr().destroy()
@@ -1205,8 +1201,6 @@ if __name__ == "__main__":
             if not _already_running():
                 break
             time.sleep(0.1)
-        setup_autostart()
         App().start()
     elif not _already_running():
-        setup_autostart()
         App(start_in_tray="--tray" in sys.argv).start()
