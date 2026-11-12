@@ -14,12 +14,16 @@ def fake_phone(key, received, stop):
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.bind(("127.0.0.1", fp.PORT))
     s.settimeout(0.2)
+    if hasattr(socket, "SIO_UDP_CONNRESET"):  # Windows: ICMP到達不能で受信が例外になるのを防ぐ
+        s.ioctl(socket.SIO_UDP_CONNRESET, False)
     pending = set()
     while not stop.is_set():
         try:
             data, addr = s.recvfrom(128)
         except socket.timeout:
             continue
+        except OSError:
+            continue  # 送信先が閉じた等の一時的なエラーは無視して待ち受けを続ける
         if len(data) == 9 and data[:1] == b"H":
             cn, sn = data[1:9], os.urandom(16)
             pending.add(sn)
