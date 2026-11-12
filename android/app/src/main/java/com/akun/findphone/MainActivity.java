@@ -71,6 +71,7 @@ public class MainActivity extends Activity {
         scroll.setBackgroundColor(0xFF111111);
         scroll.addView(root);
         setContentView(scroll);
+        RingService.log("画面を開いた(待受設定: " + (isOn() ? "ON" : "OFF") + ")");
 
         if (Build.VERSION.SDK_INT >= 33
                 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
@@ -123,8 +124,13 @@ public class MainActivity extends Activity {
     private void setOn(boolean on) {
         Proto.prefs(this).edit().putBoolean("on", on).apply();
         Intent svc = new Intent(this, RingService.class);
-        if (on) startForegroundService(svc);
-        else stopService(svc);
+        RingService.log(on ? "待受ONを要求" : "待受OFFを要求");
+        try {
+            if (on) startForegroundService(svc);
+            else stopService(svc);
+        } catch (Exception e) {
+            RingService.log("サービスを起動できません: " + e);
+        }
         refresh();
     }
 
