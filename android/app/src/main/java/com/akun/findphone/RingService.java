@@ -24,7 +24,12 @@ import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.text.SimpleDateFormat;
+import java.util.ArrayDeque;
 import java.util.Arrays;
+import java.util.Date;
+import java.util.Iterator;
+import java.util.Locale;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -97,53 +102,110 @@ public class RingService extends Service {
         thread.start();
     }
 
+    // ---- ログ(画面表示用) ----
+
+    private static final ArrayDeque<String> LOG = new ArrayDeque<>();
+
+    static synchronized void log(String msg) {
+        LOG.addLast(new SimpleDateFormat("HH:mm:ss", Locale.US).format(new Date()) + " " + msg);
+        while (LOG.size() > 200) LOG.removeFirst();
+        android.util.Log.i("FindPhone", msg);
+    }
+
+    /** 新しい順に並べたログ。 */
+    static synchronized String logText() {
+        StringBuilder b = new StringBuilder();
+        for (Iterator<String> it = LOG.descendingIterator(); it.hasNext(); ) b.append(it.next()).append('\n');
+        return b.toString();
+    }
+
+    // ---- 待ち受け ----
+
+    /** ソケットが落ちても自動で張り直して待ち受けを続ける。 */
     private void listenLoop() {
-        try (DatagramSocket s = new DatagramSocket(null)) {
-            sock = s;
-            s.setReuseAddress(true);
-            s.bind(new InetSocketAddress(Proto.PORT));
-            byte[] buf = new byte[128];
-            Map<String, Long> pending = new HashMap<>(); // 発行済みチャレンジ(sn -> 期限)
-            long lastHello = 0;
-
-            while (running) {
-                DatagramPacket p = new DatagramPacket(buf, buf.length);
-                s.receive(p);
-                InetAddress from = p.getAddress();
-                // LAN(プライベート/リンクローカル)以外は無視
-                if (!from.isSiteLocalAddress() && !from.isLinkLocalAddress()) continue;
-
-                int n = p.getLength();
-                long now = SystemClock.elapsedRealtime();
-                byte[] key = Proto.key(this);
-
-                if (n == 9 && buf[0] == 'H') {
-                    if (now - lastHello < 300) continue; // 連打対策
-                    lastHello = now;
-                    if (pending.size() > 16) pending.clear();
-                    byte[] cn = Arrays.copyOfRange(buf, 1, 9);
-                    byte[] sn = Proto.random(16);
-                    byte[] mac = Proto.mac(key, new byte[]{'C'}, cn, sn);
-                    pending.put(Proto.hex(sn), now + CHALLENGE_TTL_MS);
-                    send(s, Proto.cat(new byte[]{'C'}, cn, sn, mac), p);
-
-                } else if (n == 49 && (buf[0] == 'R' || buf[0] == 'S')) {
-                    byte cmd = buf[0];
-                    byte[] sn = Arrays.copyOfRange(buf, 1, 17);
-                    byte[] given = Arrays.copyOfRange(buf, 17, 49);
-                    byte[] expect = Proto.mac(key, new byte[]{cmd}, sn);
-                    if (!Proto.same(given, expect)) continue;
-                    Long deadline = pending.remove(Proto.hex(sn)); // 1回限り
-                    if (deadline == null || deadline < now) continue;
-
-                    if (cmd == 'R') main.post(this::startRing);
-                    else main.post(this::stopRing);
-                    byte[] ack = Proto.mac(key, new byte[]{'A'}, new byte[]{cmd}, sn);
-                    send(s, Proto.cat(new byte[]{'A', cmd}, sn, ack), p);
-                }
+        while (running) {
+            try (DatagramSocket s = new DatagramSocket(null)) {
+                sock = s;
+                s.setReuseAddress(true);
+                s.setBroadcast(true);
+                s.bind(new InetSocketAddress(Proto.PORT));
+                log("待受開始 UDP " + Proto.PORT);
+                serve(s);
+            } catch (Exception e) {
+                if (running) log("ソケット異常: " + e);
             }
-        } catch (Exception ignored) {
-            // ソケットclose(サービス終了)で抜ける
+            if (running) SystemClock.sleep(2000);
+        }
+        log("待受停止");
+    }
+
+    private void serve(DatagramSocket s) throws java.io.IOException {
+        byte[] buf = new byte[128];
+        Map<String, Long> pending = new HashMap<>(); // 発行済みチャレンジ(sn -> 期限)
+        while (running) {
+            DatagramPacket p = new DatagramPacket(buf, buf.length);
+            s.receive(p);
+            try {
+                handle(s, p, pending);
+            } catch (Exception e) {
+                log("処理エラー: " + e); // 1パケットの失敗で待ち受けを止めない
+            }
+        }
+    }
+
+    private void handle(DatagramSocket s, DatagramPacket p, Map<String, Long> pending) throws java.io.IOException {
+        byte[] buf = p.getData();
+        InetAddress from = p.getAddress();
+        String who = from.getHostAddress();
+        if (!from.isSiteLocalAddress() && !from.isLinkLocalAddress()) {
+            log("LAN外からの受信を無視: " + who);
+            return;
+        }
+        int n = p.getLength();
+        long now = SystemClock.elapsedRealtime();
+        byte[] key = Proto.key(this);
+        for (Iterator<Long> it = pending.values().iterator(); it.hasNext(); ) {
+            if (it.next() < now) it.remove(); // 期限切れのチャレンジを掃除
+        }
+
+        if (n == 9 && buf[0] == 'H') {
+            if (pending.size() >= 64) return; // 連打対策
+            byte[] cn = Arrays.copyOfRange(buf, 1, 9);
+            byte[] sn = Proto.random(16);
+            pending.put(Proto.hex(sn), now + CHALLENGE_TTL_MS);
+            send(s, Proto.cat(new byte[]{'C'}, cn, sn, Proto.mac(key, new byte[]{'C'}, cn, sn)), p);
+            logHello(who);
+        } else if (n == 49 && (buf[0] == 'R' || buf[0] == 'S')) {
+            byte cmd = buf[0];
+            byte[] sn = Arrays.copyOfRange(buf, 1, 17);
+            byte[] given = Arrays.copyOfRange(buf, 17, 49);
+            if (!Proto.same(given, Proto.mac(key, new byte[]{cmd}, sn))) {
+                log("命令の署名が不一致(鍵が違う): " + who);
+                return;
+            }
+            Long deadline = pending.remove(Proto.hex(sn)); // 1回限り
+            if (deadline == null || deadline < now) {
+                log("期限切れ・再送の命令を拒否: " + who);
+                return;
+            }
+            log((cmd == 'R' ? "鳴動" : "停止") + "命令を受理: " + who);
+            if (cmd == 'R') main.post(this::startRing);
+            else main.post(this::stopRing);
+            send(s, Proto.cat(new byte[]{'A', cmd}, sn, Proto.mac(key, new byte[]{'A'}, new byte[]{cmd}, sn)), p);
+        } else {
+            log("不明なパケット " + n + "B: " + who);
+        }
+    }
+
+    // 3秒ごとの接続確認でログが埋まらないよう、同じ相手の探索は30秒に1回だけ記録する
+    private final Map<String, Long> helloLogged = new HashMap<>();
+
+    private void logHello(String who) {
+        long now = SystemClock.elapsedRealtime();
+        Long last = helloLogged.get(who);
+        if (last == null || now - last > 30000) {
+            helloLogged.put(who, now);
+            log("探索に応答: " + who);
         }
     }
 
@@ -169,6 +231,7 @@ public class RingService extends Service {
         player = createPlayer(chosenSound());
         if (player == null) player = createPlayer(defaultSound()); // 選択音が使えない時は既定音
         if (player == null) {
+            log("音を再生できません");
             stopRing();
             return;
         }
