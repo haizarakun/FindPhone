@@ -23,67 +23,163 @@ except ImportError:  # 画面なしの環境(通信部分のテスト用)
     tk = None
 
 APP_NAME = "FindPhone"
-VERSION = "1.1.0"
+VERSION = "1.00"
 PORT = 47321
 APP_DIR = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), APP_NAME)
 KEY_FILE = os.path.join(APP_DIR, "key.bin")
 LAST_IP_FILE = os.path.join(APP_DIR, "last_ip.txt")
+LANG_FILE = os.path.join(APP_DIR, "lang.txt")
 
 LINK_CHECK_INTERVAL = 3.0   # 接続確認の間隔(秒)
 SWEEP_EVERY_FAILS = 5       # 接続確認がこの回数続けて失敗したら、全端末へ探索を送る
 
 
-# ---- 表示テキスト(日本語 / 英語) ----
+# ---- 表示テキスト(10言語。ログは日本語と英語のみで、他の言語では英語になる) ----
 
-def _is_japanese() -> bool:
+LANGUAGES = {  # 言語コード -> (言語名, 文字が正しく出るフォント)
+    "ja": ("日本語", "Yu Gothic UI"),
+    "en": ("English", "Segoe UI"),
+    "zh-CN": ("简体中文", "Microsoft YaHei UI"),
+    "zh-TW": ("繁體中文", "Microsoft JhengHei UI"),
+    "ko": ("한국어", "Malgun Gothic"),
+    "es": ("Español", "Segoe UI"),
+    "fr": ("Français", "Segoe UI"),
+    "de": ("Deutsch", "Segoe UI"),
+    "pt": ("Português", "Segoe UI"),
+    "ru": ("Русский", "Segoe UI"),
+}
+
+_UI_KEYS = ("title ring stop pair show_log hide_log language link_checking link_ok link_ng link_unpaired "
+            "msg_ready msg_unpaired msg_searching msg_ringing msg_stopped msg_not_found msg_paired "
+            "pair_prompt pair_bad pair_save_failed ok cancel").split()
+
+_UI = {
+    "ja": "スマホ探し|鳴らす|止める|ペアリング|ログを表示|ログを隠す|言語|確認中…|接続中  {ip}|未接続|未ペアリング|"
+          "ボタンを押すとスマホが鳴ります|最初にペアリングしてください|探しています…|鳴らしています|止めました|"
+          "見つかりません。スマホの「ヘルプ」で診断できます|ペアリングしました|"
+          "スマホに表示されたペアリングコードを入力|コードが正しくありません|鍵を保存できません: {e}|OK|キャンセル",
+    "en": "Find Phone|Ring|Stop|Pair|Show log|Hide log|Language|Checking…|Connected  {ip}|Not connected|Not paired|"
+          "Press the button to ring your phone|Pair with your phone first|Searching…|Ringing|Stopped|"
+          "Not found. Open Help on the phone to diagnose|Paired|"
+          "Enter the pairing code shown on the phone|The code is not valid|Could not save the key: {e}|OK|Cancel",
+    "zh-CN": "找手机|响铃|停止|配对|显示日志|隐藏日志|语言|检查中…|已连接  {ip}|未连接|未配对|"
+             "按下按钮即可让手机响铃|请先与手机配对|正在查找…|正在响铃|已停止|"
+             "未找到。可在手机的“帮助”中诊断|配对成功|"
+             "输入手机上显示的配对码|配对码无效|无法保存密钥：{e}|确定|取消",
+    "zh-TW": "找手機|響鈴|停止|配對|顯示記錄|隱藏記錄|語言|檢查中…|已連線  {ip}|未連線|未配對|"
+             "按下按鈕即可讓手機響鈴|請先與手機配對|正在尋找…|正在響鈴|已停止|"
+             "找不到。可在手機的「說明」中診斷|配對成功|"
+             "輸入手機上顯示的配對碼|配對碼無效|無法儲存金鑰：{e}|確定|取消",
+    "ko": "폰 찾기|울리기|중지|페어링|로그 보기|로그 숨기기|언어|확인 중…|연결됨  {ip}|연결 안 됨|페어링 안 됨|"
+          "버튼을 누르면 폰이 울립니다|먼저 폰과 페어링하세요|찾는 중…|울리는 중|중지했습니다|"
+          "찾을 수 없습니다. 폰의 '도움말'에서 진단할 수 있습니다|페어링했습니다|"
+          "폰에 표시된 페어링 코드를 입력하세요|코드가 올바르지 않습니다|키를 저장할 수 없습니다: {e}|확인|취소",
+    "es": "Buscar teléfono|Sonar|Detener|Vincular|Mostrar registro|Ocultar registro|Idioma|Comprobando…|"
+          "Conectado  {ip}|Sin conexión|Sin vincular|"
+          "Pulsa el botón para hacer sonar tu teléfono|Primero vincula tu teléfono|Buscando…|Sonando|Detenido|"
+          "No encontrado. Abre Ayuda en el teléfono para diagnosticar|Vinculado|"
+          "Introduce el código de vinculación del teléfono|El código no es válido|No se pudo guardar la clave: {e}|"
+          "Aceptar|Cancelar",
+    "fr": "Trouver le téléphone|Sonner|Arrêter|Associer|Afficher le journal|Masquer le journal|Langue|Vérification…|"
+          "Connecté  {ip}|Non connecté|Non associé|"
+          "Appuyez sur le bouton pour faire sonner votre téléphone|Associez d'abord votre téléphone|Recherche…|"
+          "Sonnerie en cours|Arrêté|"
+          "Introuvable. Ouvrez l'Aide sur le téléphone pour diagnostiquer|Associé|"
+          "Saisissez le code d'association affiché sur le téléphone|Le code n'est pas valide|"
+          "Impossible d'enregistrer la clé : {e}|OK|Annuler",
+    "de": "Handy finden|Klingeln|Stopp|Koppeln|Protokoll anzeigen|Protokoll verbergen|Sprache|Prüfe…|"
+          "Verbunden  {ip}|Nicht verbunden|Nicht gekoppelt|"
+          "Drücke den Knopf, um dein Handy klingeln zu lassen|Kopple zuerst dein Handy|Suche…|Klingelt|Gestoppt|"
+          "Nicht gefunden. Öffne die Hilfe auf dem Handy zur Diagnose|Gekoppelt|"
+          "Gib den Kopplungscode vom Handy ein|Der Code ist ungültig|Schlüssel konnte nicht gespeichert werden: {e}|"
+          "OK|Abbrechen",
+    "pt": "Encontrar telefone|Tocar|Parar|Parear|Mostrar registro|Ocultar registro|Idioma|Verificando…|"
+          "Conectado  {ip}|Sem conexão|Não pareado|"
+          "Pressione o botão para fazer o telefone tocar|Primeiro pareie com o telefone|Procurando…|Tocando|Parado|"
+          "Não encontrado. Abra a Ajuda no telefone para diagnosticar|Pareado|"
+          "Digite o código de pareamento mostrado no telefone|O código não é válido|"
+          "Não foi possível salvar a chave: {e}|OK|Cancelar",
+    "ru": "Поиск телефона|Позвонить|Стоп|Сопряжение|Показать журнал|Скрыть журнал|Язык|Проверка…|"
+          "Подключено  {ip}|Нет связи|Нет сопряжения|"
+          "Нажмите кнопку, чтобы телефон зазвонил|Сначала выполните сопряжение с телефоном|Поиск…|Звонит|Остановлено|"
+          "Не найден. Откройте «Справку» на телефоне для диагностики|Сопряжено|"
+          "Введите код сопряжения с экрана телефона|Неверный код|Не удалось сохранить ключ: {e}|ОК|Отмена",
+}
+TEXTS = {code: dict(zip(_UI_KEYS, blob.split("|"))) for code, blob in _UI.items()}
+assert all(len(v) == len(_UI_KEYS) for v in TEXTS.values())
+
+TEXTS["ja"].update({
+    "log_start": "起動 v{v}",
+    "log_no_lan": "LANのIPアドレスが見つかりません(ネットワーク未接続?)",
+    "log_from": "送信元: {ips}",
+    "log_wrong_key": "{ip} が応答しましたが鍵が違います。再ペアリングしてください",
+    "log_found": "スマホ発見: {ip}",
+    "log_sent": "命令を送信",
+    "log_ack": "スマホが命令を受理",
+    "log_timeout": "{sec:.0f}秒以内に応答なし",
+    "log_link_ok": "接続確認: 接続中 {ip}",
+    "log_link_ng": "接続確認: 応答なし",
+})
+TEXTS["en"].update({
+    "log_start": "Started v{v}",
+    "log_no_lan": "No LAN address found (network disconnected?)",
+    "log_from": "Sending from: {ips}",
+    "log_wrong_key": "{ip} answered with a different key. Pair again",
+    "log_found": "Phone found: {ip}",
+    "log_sent": "Command sent",
+    "log_ack": "Phone accepted the command",
+    "log_timeout": "No answer within {sec:.0f} s",
+    "log_link_ok": "Link check: connected {ip}",
+    "log_link_ng": "Link check: no answer",
+})
+
+
+def _system_language() -> str:
+    """Windowsの表示言語から初期の言語を決める。"""
     try:
         import ctypes
-        return ctypes.windll.kernel32.GetUserDefaultUILanguage() & 0x3FF == 0x11
+        lang_id = ctypes.windll.kernel32.GetUserDefaultUILanguage()
     except Exception:
-        return os.environ.get("LANG", "").lower().startswith("ja")
+        return "ja" if os.environ.get("LANG", "").lower().startswith("ja") else "en"
+    primary = lang_id & 0x3FF
+    if primary == 0x04:  # 中国語: 台湾・香港・マカオは繁体字
+        return "zh-TW" if lang_id in (0x0404, 0x0C04, 0x1404) else "zh-CN"
+    return {0x11: "ja", 0x12: "ko", 0x0A: "es", 0x0C: "fr", 0x07: "de", 0x16: "pt", 0x19: "ru"}.get(primary, "en")
 
 
-TEXTS = {
-    "title": ("スマホ探し", "Find Phone"),
-    "ring": ("鳴らす", "Ring"),
-    "stop": ("止める", "Stop"),
-    "pair": ("ペアリング", "Pair"),
-    "show_log": ("ログを表示", "Show log"),
-    "hide_log": ("ログを隠す", "Hide log"),
-    "link_checking": ("確認中…", "Checking…"),
-    "link_ok": ("接続中  {ip}", "Connected  {ip}"),
-    "link_ng": ("未接続", "Not connected"),
-    "link_unpaired": ("未ペアリング", "Not paired"),
-    "msg_ready": ("ボタンを押すとスマホが鳴ります", "Press the button to ring your phone"),
-    "msg_unpaired": ("最初にペアリングしてください", "Pair with your phone first"),
-    "msg_searching": ("探しています…", "Searching…"),
-    "msg_ringing": ("鳴らしています", "Ringing"),
-    "msg_stopped": ("止めました", "Stopped"),
-    "msg_not_found": ("見つかりません。スマホの「ヘルプ」で診断できます",
-                      "Not found. Open Help on the phone to diagnose"),
-    "msg_paired": ("ペアリングしました", "Paired"),
-    "pair_prompt": ("スマホに表示されたペアリングコードを入力", "Enter the pairing code shown on the phone"),
-    "pair_bad": ("コードが正しくありません", "The code is not valid"),
-    "pair_save_failed": ("鍵を保存できません: {e}", "Could not save the key: {e}"),
-    "ok": ("OK", "OK"),
-    "cancel": ("キャンセル", "Cancel"),
-    "log_start": ("起動 v{v}", "Started v{v}"),
-    "log_no_lan": ("LANのIPアドレスが見つかりません(ネットワーク未接続?)", "No LAN address found (network disconnected?)"),
-    "log_from": ("送信元: {ips}", "Sending from: {ips}"),
-    "log_wrong_key": ("{ip} が応答しましたが鍵が違います。再ペアリングしてください",
-                      "{ip} answered with a different key. Pair again"),
-    "log_found": ("スマホ発見: {ip}", "Phone found: {ip}"),
-    "log_sent": ("命令を送信", "Command sent"),
-    "log_ack": ("スマホが命令を受理", "Phone accepted the command"),
-    "log_timeout": ("{sec:.0f}秒以内に応答なし", "No answer within {sec:.0f} s"),
-    "log_link_ok": ("接続確認: 接続中 {ip}", "Link check: connected {ip}"),
-    "log_link_ng": ("接続確認: 応答なし", "Link check: no answer"),
-}
-_LANG = 0 if _is_japanese() else 1
+def load_language() -> str:
+    """設定で選んだ言語。未設定ならWindowsの表示言語に合わせる。"""
+    try:
+        with open(LANG_FILE, encoding="ascii") as f:
+            code = f.read().strip()
+        if code in LANGUAGES:
+            return code
+    except OSError:
+        pass
+    return _system_language()
+
+
+def save_language(code: str) -> None:
+    try:
+        os.makedirs(APP_DIR, exist_ok=True)
+        with open(LANG_FILE, "w", encoding="ascii") as f:
+            f.write(code)
+    except OSError:
+        pass
+
+
+_lang = load_language()
+
+
+def set_language(code: str) -> None:
+    global _lang
+    _lang = code
+    save_language(code)
 
 
 def tr(key: str, **values) -> str:
-    return TEXTS[key][_LANG].format(**values)
+    text = TEXTS[_lang].get(key) or TEXTS["en"][key]
+    return text.format(**values)
 
 
 # ---- 鍵の保管(Windows DPAPI: ログイン中のユーザーだけが復号できる) ----
@@ -273,10 +369,12 @@ def _already_running() -> bool:
         ctypes.windll.kernel32.CreateMutexW(None, False, "Local\\FindPhonePC")
         if ctypes.windll.kernel32.GetLastError() != 183:  # ERROR_ALREADY_EXISTS
             return False
-        hwnd = ctypes.windll.user32.FindWindowW(None, tr("title"))
-        if hwnd:
-            ctypes.windll.user32.ShowWindow(hwnd, 9)  # SW_RESTORE
-            ctypes.windll.user32.SetForegroundWindow(hwnd)
+        for texts in TEXTS.values():  # ウィンドウ名は表示言語で変わるので全言語で探す
+            hwnd = ctypes.windll.user32.FindWindowW(None, texts["title"])
+            if hwnd:
+                ctypes.windll.user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+                ctypes.windll.user32.SetForegroundWindow(hwnd)
+                break
         return True
     except Exception:
         return False
@@ -301,14 +399,13 @@ ACCENT = "#3DDC84"
 ACCENT_HOVER = "#5BE89A"
 ACCENT_BUSY = "#1F6F43"
 ON_ACCENT = "#06210F"
+FONT = "Segoe UI"  # 画面を組み立てる時に、選んだ言語のフォントへ差し替える
 BAD = "#FF5252"
-FONT = "Yu Gothic UI" if _LANG == 0 else "Segoe UI"
 
 
 class App:
     def __init__(self):
         self.root = tk.Tk()
-        self.root.title(tr("title"))
         self.root.configure(bg=BG)
         self.root.resizable(False, False)
         try:
@@ -325,7 +422,6 @@ class App:
 
         self._build()
         self.log(tr("log_start", v=VERSION))
-        self.show(tr("msg_unpaired") if self.key is None else tr("msg_ready"))
         self._set_link(None)
         threading.Thread(target=self._watch_link, daemon=True).start()
 
@@ -333,7 +429,11 @@ class App:
         return round(value * self.scale)
 
     def _build(self):
+        """現在の言語で画面を組み立てる(言語を切り替えた時は作り直す)。"""
+        global FONT
+        FONT = LANGUAGES[_lang][1]
         root = self.root
+        root.title(tr("title"))
         tk.Label(root, text=tr("title"), fg=TEXT, bg=BG, font=(FONT, 15, "bold")).pack(pady=(self.px(18), 0))
         self.link = tk.Label(root, text="", fg=SUB, bg=BG, font=(FONT, 10))
         self.link.pack(pady=(self.px(4), 0))
@@ -357,15 +457,43 @@ class App:
         self._button(row, tr("stop"), lambda: self.run(b"S")).pack(side="left", padx=self.px(4))
         self._button(row, tr("pair"), self.pair).pack(side="left", padx=self.px(4))
 
-        self.log_toggle = tk.Label(root, text=tr("show_log"), fg=SUB, bg=BG, font=(FONT, 9), cursor="hand2")
-        self.log_toggle.pack(pady=(self.px(14), self.px(12)))
+        links = tk.Frame(root, bg=BG)
+        links.pack(pady=(self.px(14), self.px(12)))
+        self.log_toggle = tk.Label(links, text=tr("show_log"), fg=SUB, bg=BG, font=(FONT, 9), cursor="hand2")
+        self.log_toggle.pack(side="left", padx=self.px(10))
         self.log_toggle.bind("<Button-1>", lambda e: self.toggle_log())
+        language = tk.Label(links, text=f"{tr('language')}: {LANGUAGES[_lang][0]}", fg=SUB, bg=BG, font=(FONT, 9),
+                            cursor="hand2")
+        language.pack(side="left", padx=self.px(10))
+        language.bind("<Button-1>", self._pick_language)
 
         self.log_box = tk.Text(root, width=44, height=9, bg=CARD, fg=SUB, relief="flat", font=("Consolas", 9),
                                state="disabled", wrap="word", padx=self.px(8), pady=self.px(6))
         root.bind("<Return>", lambda e: self.run(b"R"))
         root.bind("<Escape>", lambda e: self.run(b"S"))
         root.minsize(self.px(320), 0)
+        self.log_visible = False
+        self.show(tr("msg_unpaired") if self.key is None else tr("msg_ready"))
+
+    # ---- 言語 ----
+
+    def _pick_language(self, event):
+        menu = tk.Menu(self.root, tearoff=0, bg=CARD, fg=TEXT, activebackground=CARD_HIGH, activeforeground=TEXT)
+        for code, (name, _font) in LANGUAGES.items():
+            menu.add_command(label=("● " if code == _lang else "    ") + name,
+                             command=lambda c=code: self.change_language(c))
+        menu.tk_popup(event.x_root, event.y_root)
+
+    def change_language(self, code):
+        if code == _lang or self.busy:
+            return
+        set_language(code)
+        log_text = self.log_box.get("1.0", "end-1c")
+        for widget in self.root.winfo_children():
+            widget.destroy()
+        self._build()
+        self._append_log(log_text + "\n" if log_text else "")
+        self._set_link(self._link_state if self._link_state not in (None, "none", "wrong-key") else None)
 
     def _button(self, parent, label, command):
         return tk.Button(parent, text=label, command=command, bg=CARD_HIGH, fg=TEXT, activebackground=CARD,
@@ -548,6 +676,8 @@ def _selftest() -> int:
         assert parse_code(code.lower()) == bytes(range(16))
         assert len(mac(b"k", b"a", b"b")) == 32
         app = App()
+        for code in LANGUAGES:  # 全言語で画面を組み立てられることを確認
+            app.change_language(code)
         app.toggle_log()
         app.pair().destroy()
         app.root.update()
