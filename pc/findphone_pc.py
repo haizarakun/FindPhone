@@ -86,7 +86,8 @@ def lan_ips():
 
 
 def send_command(key: bytes, cmd: bytes, timeout: float = 5.0) -> bool:
-    """スマホを探して cmd(b'R'=鳴らす / b'S'=止める) を送り、受理通知まで確認する。"""
+    """スマホを探して cmd(b'R'=鳴らす / b'S'=止める) を送り、受理通知まで確認する。
+    cmd が None のときは探すだけで、正しい鍵で応答したスマホのIPを返す(接続確認用)。"""
     cn = os.urandom(8)
     socks = []
     for ip in lan_ips():
@@ -125,6 +126,8 @@ def send_command(key: bytes, cmd: bytes, timeout: float = 5.0) -> bool:
                     sn = data[9:25]
                     if not hmac.compare_digest(data[25:], mac(key, b"C", cn, sn)):
                         continue  # 鍵を知らない相手は無視
+                    if cmd is None:
+                        return addr[0]
                     s.sendto(cmd + sn + mac(key, cmd, sn), addr)
                     waiting_ack[s] = sn
                 elif len(data) == 50 and data[:1] == b"A" and data[1:2] == cmd and s in waiting_ack:
@@ -143,17 +146,35 @@ class App:
     def __init__(self):
         self.root = tk.Tk()
         self.root.title("スマホ探し")
-        self.root.geometry("260x230")
+        self.root.geometry("260x260")
         self.root.resizable(False, False)
         self.root.configure(bg="#111111")
         self.key = load_key()
 
         self.status = tk.Label(self.root, text="", fg="#cccccc", bg="#111111", font=("Meiryo UI", 10))
         self.status.pack(pady=(16, 8))
+        self.link = tk.Label(self.root, text="● 確認中…", fg="#888888", bg="#111111", font=("Meiryo UI", 10))
+        self.link.pack(pady=(0, 6))
         self.ring_btn = self._button("スマホを鳴らす", lambda: self.run(b"R"), "#2e7d32")
         self.stop_btn = self._button("止める", lambda: self.run(b"S"), "#444444")
         self._button("ペアリング設定", self.pair, "#222222")
         self.show("未ペアリング" if self.key is None else "準備OK")
+        threading.Thread(target=self._watch_link, daemon=True).start()
+
+    def _watch_link(self):
+        """3秒ごとにスマホへ問い合わせ、リンク状態をリアルタイム表示する。"""
+        while True:
+            ip = send_command(self.key, None, timeout=2.0) if self.key else None
+            self.root.after(0, self._set_link, ip)
+            time.sleep(3)
+
+    def _set_link(self, ip):
+        if ip:
+            self.link.config(text=f"● 接続中  {ip}", fg="#4caf50")
+        elif self.key is None:
+            self.link.config(text="● 未ペアリング", fg="#888888")
+        else:
+            self.link.config(text="● 未接続", fg="#e53935")
 
     def _button(self, label, cmd, bg):
         b = tk.Button(self.root, text=label, command=cmd, bg=bg, fg="white", relief="flat",
