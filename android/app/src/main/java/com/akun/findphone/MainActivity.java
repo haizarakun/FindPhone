@@ -44,6 +44,9 @@ public class MainActivity extends Activity {
         root.addView(toggle);
         root.addView(button("ペアリングコードを表示", v -> code.setText(Proto.pairCode(this))));
         root.addView(code);
+        root.addView(button("コードを共有(PCへ送る)", v -> startActivity(Intent.createChooser(
+                new Intent(Intent.ACTION_SEND).setType("text/plain")
+                        .putExtra(Intent.EXTRA_TEXT, Proto.pairCode(this)), "PCへ送る"))));
         root.addView(button("コードを再生成", v -> {
             Proto.regenerate(this);
             code.setText("");
