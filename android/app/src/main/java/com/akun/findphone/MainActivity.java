@@ -1,5 +1,9 @@
 package com.akun.findphone;
 
+import android.os.Handler;
+import android.os.Looper;
+import android.widget.ScrollView;
+
 import android.Manifest;
 import android.app.Activity;
 import android.content.Intent;
@@ -56,7 +60,17 @@ public class MainActivity extends Activity {
         root.addView(button("鳴動を止める", v -> {
             if (isOn()) startService(new Intent(this, RingService.class).setAction(RingService.ACT_STOP));
         }));
-        setContentView(root);
+        TextView logTitle = text(13, 0xFFAAAAAA, Typeface.DEFAULT);
+        logTitle.setText("ログ(新しい順)");
+        root.addView(logTitle);
+        logView = text(11, 0xFF9E9E9E, Typeface.MONOSPACE);
+        logView.setTextIsSelectable(true);
+        root.addView(logView);
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.setBackgroundColor(0xFF111111);
+        scroll.addView(root);
+        setContentView(scroll);
 
         if (Build.VERSION.SDK_INT >= 33
                 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
@@ -69,11 +83,13 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         refresh();
+        ui.post(logTick);
     }
 
     @Override
     protected void onPause() {
         code.setText(""); // 画面を離れたらコードを隠す
+        ui.removeCallbacks(logTick);
         super.onPause();
     }
 
@@ -111,6 +127,18 @@ public class MainActivity extends Activity {
         else stopService(svc);
         refresh();
     }
+
+    // ---- ログ表示(画面表示中だけ1秒ごとに更新) ----
+
+    private TextView logView;
+    private final Handler ui = new Handler(Looper.getMainLooper());
+    private final Runnable logTick = new Runnable() {
+        @Override
+        public void run() {
+            logView.setText(RingService.logText());
+            ui.postDelayed(this, 1000);
+        }
+    };
 
     private void refresh() {
         boolean on = isOn();
