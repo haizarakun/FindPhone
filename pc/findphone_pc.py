@@ -29,12 +29,13 @@ except ImportError:  # 無くても動く(QRでのペアリングだけ使えな
     qrcode = None
 
 APP_NAME = "FindPhone"
-VERSION = "1.01"
+VERSION = "1.00"
 PORT = 47321
 APP_DIR = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), APP_NAME)
 KEY_FILE = os.path.join(APP_DIR, "key.bin")
 LAST_IP_FILE = os.path.join(APP_DIR, "last_ip.txt")
 LANG_FILE = os.path.join(APP_DIR, "lang.txt")
+AUTOSTART_FLAG_FILE = os.path.join(APP_DIR, "autostart_configured.txt")
 LATEST_RELEASE_API = "https://api.github.com/repos/haizarakun/FindPhone/releases/latest"
 QR_PREFIX = "FINDPHONE1:"  # スマホアプリが読み取るQRコードの先頭
 
@@ -61,7 +62,8 @@ LANGUAGES = {  # 言語コード -> (言語名, 文字が正しく出るフォ�
 _UI_KEYS = ("title ring stop pair show_log hide_log language link_checking link_ok link_ng link_unpaired "
             "msg_ready msg_unpaired msg_searching msg_ringing msg_stopped msg_not_found msg_paired "
             "pair_prompt pair_bad pair_save_failed ok cancel "
-            "show_qr qr_hint qr_waiting update_available updating update_failed").split()
+            "show_qr qr_hint qr_waiting update_available updating update_failed "
+            "tray_open autostart quit").split()
 
 _UI = {
     "ja": "スマホ探し|鳴らす|止める|ペアリング|ログを表示|ログを隠す|言語|確認中…|接続中  {ip}|未接続|未ペアリング|"
@@ -127,7 +129,20 @@ _UI_MORE = {  # QRペアリングとアップデートの文言
     "pt": "Mostrar código QR|Leia com “Ler o código QR do PC” no app do telefone|Aguardando o telefone…|Atualizar para v{v}|Atualizando…|Falha na atualização",
     "ru": "Показать QR-код|Отсканируйте его через «Сканировать QR-код на ПК» в приложении на телефоне|Ожидание телефона…|Обновить до v{v}|Обновление…|Не удалось обновить",
 }
-TEXTS = {code: dict(zip(_UI_KEYS, (blob + "|" + _UI_MORE[code]).split("|"))) for code, blob in _UI.items()}
+_UI_TRAY = {  # 通知領域(タスクバー右下)のメニュー
+    "ja": "開く|Windowsの起動時に開始|終了",
+    "en": "Open|Start with Windows|Exit",
+    "zh-CN": "打开|随 Windows 启动|退出",
+    "zh-TW": "開啟|隨 Windows 啟動|結束",
+    "ko": "열기|Windows 시작 시 실행|종료",
+    "es": "Abrir|Iniciar con Windows|Salir",
+    "fr": "Ouvrir|Démarrer avec Windows|Quitter",
+    "de": "Öffnen|Mit Windows starten|Beenden",
+    "pt": "Abrir|Iniciar com o Windows|Sair",
+    "ru": "Открыть|Запускать вместе с Windows|Выход",
+}
+TEXTS = {code: dict(zip(_UI_KEYS, "|".join((blob, _UI_MORE[code], _UI_TRAY[code])).split("|")))
+         for code, blob in _UI.items()}
 assert all(len(v) == len(_UI_KEYS) for v in TEXTS.values())
 
 TEXTS["ja"].update({
@@ -406,7 +421,7 @@ def check_update():
     return None
 
 
-def apply_update(url: str, sha256: str) -> None:
+def apply_update(url: str, sha256: str, before_restart=None) -> None:
     """新しいexeをダウンロードして照合し、今のexeと入れ替えて起動し直す。失敗時は例外。"""
     if not getattr(sys, "frozen", False):
         raise OSError("not running as exe")
@@ -421,6 +436,8 @@ def apply_update(url: str, sha256: str) -> None:
         os.remove(old)
     os.replace(exe, old)  # 実行中のexeは消せないが、名前の変更はできる
     os.replace(new, exe)
+    if before_restart:
+        before_restart()
     subprocess.Popen([exe, "--updated"], close_fds=True)
     os._exit(0)
 
@@ -442,22 +459,198 @@ def _resource(name: str) -> str:
 
 
 def _already_running() -> bool:
-    """二重起動なら、既に開いているウィンドウを前面に出して True を返す。"""
+    """二重起動なら、既に動いている方へ「ウィンドウを開け」と伝えて True を返す。"""
     try:
         import ctypes
         handle = ctypes.windll.kernel32.CreateMutexW(None, False, "Local\\FindPhonePC")
         if ctypes.windll.kernel32.GetLastError() != 183:  # ERROR_ALREADY_EXISTS
             return False
         ctypes.windll.kernel32.CloseHandle(handle)
-        for texts in TEXTS.values():  # ウィンドウ名は表示言語で変わるので全言語で探す
-            hwnd = ctypes.windll.user32.FindWindowW(None, texts["title"])
-            if hwnd:
-                ctypes.windll.user32.ShowWindow(hwnd, 9)  # SW_RESTORE
-                ctypes.windll.user32.SetForegroundWindow(hwnd)
-                break
+        hwnd = ctypes.windll.user32.FindWindowW(Tray.CLASS_NAME, None)
+        if hwnd:
+            ctypes.windll.user32.PostMessageW(hwnd, Tray.MSG_SHOW, 0, 0)
         return True
     except Exception:
         return False
+
+
+# ---- Windowsの起動時に自動で開始 ----
+
+_RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
+
+
+def autostart_enabled() -> bool:
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _RUN_KEY) as key:
+            winreg.QueryValueEx(key, APP_NAME)
+        return True
+    except (ImportError, OSError):
+        return False
+
+
+def set_autostart(enabled: bool) -> None:
+    """ログイン時の自動起動を登録/解除する(現在のユーザーのみ。管理者権限は不要)。"""
+    if not getattr(sys, "frozen", False):
+        return  # exeとして動いている時だけ登録する
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _RUN_KEY, 0, winreg.KEY_SET_VALUE) as key:
+            if enabled:  # --tray: ウィンドウを出さず、通知領域に入った状態で起動する
+                winreg.SetValueEx(key, APP_NAME, 0, winreg.REG_SZ, f'"{sys.executable}" --tray')
+            else:
+                winreg.DeleteValue(key, APP_NAME)
+    except (ImportError, OSError):
+        pass
+
+
+def setup_autostart() -> None:
+    """初回だけ自動起動をオンにする。以降は利用者の選択を尊重し、exeを移動していたら場所だけ更新する。"""
+    if not os.path.exists(AUTOSTART_FLAG_FILE):
+        set_autostart(True)
+        try:
+            os.makedirs(APP_DIR, exist_ok=True)
+            with open(AUTOSTART_FLAG_FILE, "w", encoding="ascii") as f:
+                f.write("1")
+        except OSError:
+            pass
+    elif autostart_enabled():
+        set_autostart(True)
+
+
+# ---- 通知領域(タスクバー右下)のアイコン ----
+
+class Tray:
+    """通知領域のアイコン。専用スレッドでWindowsのメッセージを受け取り、操作をコールバックで知らせる。
+
+    on_open: アイコンをクリックした時 / build_menu: 右クリック時に [(ID, 表示名, チェック有無)] を返す /
+    on_command: メニューで選ばれたID。いずれもこのスレッドから呼ばれるので、画面操作は呼ばれた側で
+    メインスレッドへ渡すこと。
+    """
+    CLASS_NAME = "FindPhoneTrayWindow"
+    MSG_TRAY = 0x8001  # アイコンの操作
+    MSG_SHOW = 0x8002  # 二重起動した側からの「ウィンドウを開け」
+
+    def __init__(self, icon_path, tooltip, on_open, build_menu, on_command):
+        self.icon_path, self.tooltip = icon_path, tooltip
+        self.on_open, self.build_menu, self.on_command = on_open, build_menu, on_command
+        self.ok = False  # アイコンを出せたか(出せない環境では通常のウィンドウとして動く)
+        self._ready = threading.Event()
+        self._remove = lambda: None
+        threading.Thread(target=self._run, daemon=True).start()
+        self._ready.wait(3)
+
+    def remove(self):
+        self._remove()
+
+    def _run(self):
+        try:
+            self._loop()
+        except Exception:
+            self.ok = False
+        finally:
+            self._ready.set()
+
+    def _loop(self):
+        import ctypes
+        from ctypes import wintypes as w
+
+        user32, shell32, kernel32 = ctypes.WinDLL("user32"), ctypes.WinDLL("shell32"), ctypes.WinDLL("kernel32")
+        LRESULT = ctypes.c_ssize_t
+        WNDPROC = ctypes.WINFUNCTYPE(LRESULT, w.HWND, w.UINT, w.WPARAM, w.LPARAM)
+
+        class WNDCLASSW(ctypes.Structure):
+            _fields_ = [("style", w.UINT), ("lpfnWndProc", WNDPROC), ("cbClsExtra", ctypes.c_int),
+                        ("cbWndExtra", ctypes.c_int), ("hInstance", w.HINSTANCE), ("hIcon", w.HICON),
+                        ("hCursor", w.HANDLE), ("hbrBackground", w.HANDLE), ("lpszMenuName", w.LPCWSTR),
+                        ("lpszClassName", w.LPCWSTR)]
+
+        class NOTIFYICONDATAW(ctypes.Structure):
+            _fields_ = [("cbSize", w.DWORD), ("hWnd", w.HWND), ("uID", w.UINT), ("uFlags", w.UINT),
+                        ("uCallbackMessage", w.UINT), ("hIcon", w.HICON), ("szTip", w.WCHAR * 128),
+                        ("dwState", w.DWORD), ("dwStateMask", w.DWORD), ("szInfo", w.WCHAR * 256),
+                        ("uVersion", w.UINT), ("szInfoTitle", w.WCHAR * 64), ("dwInfoFlags", w.DWORD),
+                        ("guidItem", ctypes.c_byte * 16), ("hBalloonIcon", w.HICON)]
+
+        # 64bitでハンドルが壊れないよう、使う関数の引数と戻り値の型を明示する
+        kernel32.GetModuleHandleW.restype, kernel32.GetModuleHandleW.argtypes = w.HMODULE, [w.LPCWSTR]
+        user32.DefWindowProcW.restype = LRESULT
+        user32.DefWindowProcW.argtypes = [w.HWND, w.UINT, w.WPARAM, w.LPARAM]
+        user32.RegisterClassW.argtypes = [ctypes.POINTER(WNDCLASSW)]
+        user32.CreateWindowExW.restype = w.HWND
+        user32.CreateWindowExW.argtypes = [w.DWORD, w.LPCWSTR, w.LPCWSTR, w.DWORD, ctypes.c_int, ctypes.c_int,
+                                           ctypes.c_int, ctypes.c_int, w.HWND, w.HMENU, w.HINSTANCE, w.LPVOID]
+        user32.LoadImageW.restype = w.HANDLE
+        user32.LoadImageW.argtypes = [w.HINSTANCE, w.LPCWSTR, w.UINT, ctypes.c_int, ctypes.c_int, w.UINT]
+        user32.CreatePopupMenu.restype = w.HMENU
+        user32.AppendMenuW.argtypes = [w.HMENU, w.UINT, ctypes.c_size_t, w.LPCWSTR]
+        user32.TrackPopupMenu.argtypes = [w.HMENU, w.UINT, ctypes.c_int, ctypes.c_int, ctypes.c_int, w.HWND,
+                                          w.LPVOID]
+        user32.DestroyMenu.argtypes = [w.HMENU]
+        user32.SetForegroundWindow.argtypes = [w.HWND]
+        user32.GetCursorPos.argtypes = [ctypes.POINTER(w.POINT)]
+        user32.GetMessageW.argtypes = [ctypes.POINTER(w.MSG), w.HWND, w.UINT, w.UINT]
+        user32.DispatchMessageW.argtypes = [ctypes.POINTER(w.MSG)]
+        user32.TranslateMessage.argtypes = [ctypes.POINTER(w.MSG)]
+        shell32.Shell_NotifyIconW.argtypes = [w.DWORD, ctypes.POINTER(NOTIFYICONDATAW)]
+
+        WM_LBUTTONUP, WM_LBUTTONDBLCLK, WM_RBUTTONUP = 0x0202, 0x0203, 0x0205
+        MF_STRING, MF_CHECKED = 0x0000, 0x0008
+        TPM_RIGHTBUTTON, TPM_RETURNCMD = 0x0002, 0x0100
+
+        def show_menu(hwnd):
+            point = w.POINT()
+            user32.GetCursorPos(ctypes.byref(point))
+            menu = user32.CreatePopupMenu()
+            for item_id, label, checked in self.build_menu():
+                user32.AppendMenuW(menu, MF_STRING | (MF_CHECKED if checked else 0), item_id, label)
+            user32.SetForegroundWindow(hwnd)  # これが無いと、メニューの外を押しても閉じない
+            chosen = user32.TrackPopupMenu(menu, TPM_RIGHTBUTTON | TPM_RETURNCMD, point.x, point.y, 0, hwnd, None)
+            user32.DestroyMenu(menu)
+            if chosen:
+                self.on_command(chosen)
+
+        def window_proc(hwnd, message, wparam, lparam):
+            try:
+                if message == Tray.MSG_SHOW or (message == Tray.MSG_TRAY
+                                                and lparam in (WM_LBUTTONUP, WM_LBUTTONDBLCLK)):
+                    self.on_open()
+                    return 0
+                if message == Tray.MSG_TRAY and lparam == WM_RBUTTONUP:
+                    show_menu(hwnd)
+                    return 0
+            except Exception:
+                pass  # コールバックの失敗でメッセージ処理を止めない
+            return user32.DefWindowProcW(hwnd, message, wparam, lparam)
+
+        self._window_proc = WNDPROC(window_proc)  # 回収されないよう参照を持ち続ける
+        instance = kernel32.GetModuleHandleW(None)
+        window_class = WNDCLASSW()
+        window_class.lpfnWndProc = self._window_proc
+        window_class.hInstance = instance
+        window_class.lpszClassName = Tray.CLASS_NAME
+        user32.RegisterClassW(ctypes.byref(window_class))
+        hwnd = user32.CreateWindowExW(0, Tray.CLASS_NAME, APP_NAME, 0, 0, 0, 0, 0, None, None, instance, None)
+        if not hwnd:
+            return
+
+        IMAGE_ICON, LR_LOADFROMFILE, LR_DEFAULTSIZE = 1, 0x0010, 0x0040
+        icon = NOTIFYICONDATAW()
+        icon.cbSize = ctypes.sizeof(NOTIFYICONDATAW)
+        icon.hWnd = hwnd
+        icon.uID = 1
+        icon.uFlags = 0x1 | 0x2 | 0x4  # NIF_MESSAGE | NIF_ICON | NIF_TIP
+        icon.uCallbackMessage = Tray.MSG_TRAY
+        icon.hIcon = user32.LoadImageW(None, self.icon_path, IMAGE_ICON, 0, 0, LR_LOADFROMFILE | LR_DEFAULTSIZE)
+        icon.szTip = self.tooltip[:127]
+        self.ok = bool(shell32.Shell_NotifyIconW(0, ctypes.byref(icon)))  # NIM_ADD
+        self._remove = lambda: shell32.Shell_NotifyIconW(2, ctypes.byref(icon))  # NIM_DELETE
+        self._ready.set()
+
+        message = w.MSG()
+        while user32.GetMessageW(ctypes.byref(message), None, 0, 0) > 0:
+            user32.TranslateMessage(ctypes.byref(message))
+            user32.DispatchMessageW(ctypes.byref(message))
 
 
 def _enable_hidpi() -> None:
@@ -484,7 +677,10 @@ BAD = "#FF5252"
 
 
 class App:
-    def __init__(self):
+    # 通知領域メニューの項目ID
+    MENU_OPEN, MENU_RING, MENU_STOP, MENU_AUTOSTART, MENU_QUIT = 1, 2, 3, 4, 5
+
+    def __init__(self, start_in_tray=False):
         self.root = tk.Tk()
         self.root.configure(bg=BG)
         self.root.resizable(False, False)
@@ -504,8 +700,53 @@ class App:
         self._build()
         self.log(tr("log_start", v=VERSION))
         self._set_link(None)
+        self.tray = self._create_tray()
+        if self.tray and self.tray.ok:
+            self.root.protocol("WM_DELETE_WINDOW", self.root.withdraw)  # 閉じるボタンは通知領域へしまう
+            if start_in_tray:
+                self.root.withdraw()
         threading.Thread(target=self._watch_link, daemon=True).start()
         threading.Thread(target=self._check_update, daemon=True).start()
+
+    # ---- 通知領域 ----
+
+    def _create_tray(self):
+        if os.name != "nt":
+            return None
+        # Tray のコールバックは別スレッドから来るので、after でメインスレッドへ渡す
+        return Tray(_resource("icon.ico"), APP_NAME,
+                    on_open=lambda: self.root.after(0, self.show_window),
+                    build_menu=self._tray_menu,
+                    on_command=lambda item: self.root.after(0, self._tray_command, item))
+
+    def _tray_menu(self):
+        return [(self.MENU_OPEN, tr("tray_open"), False),
+                (self.MENU_RING, tr("ring"), False),
+                (self.MENU_STOP, tr("stop"), False),
+                (self.MENU_AUTOSTART, tr("autostart"), autostart_enabled()),
+                (self.MENU_QUIT, tr("quit"), False)]
+
+    def _tray_command(self, item):
+        if item == self.MENU_OPEN:
+            self.show_window()
+        elif item == self.MENU_RING:
+            self.run(b"R")
+        elif item == self.MENU_STOP:
+            self.run(b"S")
+        elif item == self.MENU_AUTOSTART:
+            set_autostart(not autostart_enabled())
+        elif item == self.MENU_QUIT:
+            self.quit()
+
+    def show_window(self):
+        self.root.deiconify()
+        self.root.lift()
+        self.root.focus_force()
+
+    def quit(self):
+        if self.tray:
+            self.tray.remove()
+        self.root.destroy()
 
     def px(self, value: float) -> int:
         return round(value * self.scale)
@@ -582,7 +823,8 @@ class App:
 
     def _update_worker(self):
         try:
-            apply_update(self.update[1], self.update[2])  # 成功するとここで新しい版に切り替わる
+            apply_update(self.update[1], self.update[2], before_restart=self.tray.remove if self.tray else None)
+            # 成功すると上の呼び出しの中で新しい版に切り替わる
         except Exception as e:
             self.log(f"{tr('update_failed')}: {e}")
             self.root.after(0, self._update_failed)
@@ -691,6 +933,7 @@ class App:
         if self.busy:
             return
         if self.key is None:
+            self.show_window()
             self.pair()
             return
         self.busy = True
@@ -869,7 +1112,9 @@ def _selftest() -> int:
         assert qrcode is not None, "qrcode module missing from the build"
         assert is_newer("1.02", "1.01") and is_newer("2.0", "1.99") and not is_newer("1.01", "1.01")
         app.root.update()
-        app.root.destroy()
+        if app.tray:  # 通知領域のメニューを組み立てられることを確認(アイコン自体はCIでは出せない場合がある)
+            assert len(app._tray_menu()) == 5
+        app.quit()
         return 0
     except BaseException:
         return 1
@@ -885,6 +1130,8 @@ if __name__ == "__main__":
             if not _already_running():
                 break
             time.sleep(0.1)
+        setup_autostart()
         App().start()
     elif not _already_running():
-        App().start()
+        setup_autostart()
+        App(start_in_tray="--tray" in sys.argv).start()
