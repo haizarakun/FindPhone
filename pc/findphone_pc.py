@@ -55,7 +55,7 @@ def load_key():
 def parse_code(text: str) -> bytes:
     s = "".join(ch for ch in text.upper() if ch.isalnum())
     key = base64.b32decode(s + "=" * (-len(s) % 8))
-    if len(key) != 16:
+    if len(key) not in (16, 20)  # 16=現行 / 20=旧版アプリ:
         raise ValueError("length")
     return key
 
@@ -164,13 +164,18 @@ class App:
                 if not text:
                     return
             try:
-                self.key = parse_code(text)
-                save_key(self.key)
-                self.show("ペアリング完了")
-                return
-            except (ValueError, OSError):
+                key = parse_code(text)
+            except ValueError:
                 continue
-        messagebox.showerror("エラー", "コードが正しくありません")
+            try:
+                save_key(key)
+            except OSError as e:
+                messagebox.showerror("エラー", f"鍵の保存に失敗しました: {e}")
+                return
+            self.key = key
+            self.show("ペアリング完了")
+            return
+        messagebox.showerror("エラー", "コードが正しくありません(スマホ側アプリが古い可能性)")
 
     def _clipboard(self):
         try:
