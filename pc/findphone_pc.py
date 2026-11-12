@@ -36,9 +36,10 @@ SWEEP_EVERY_FAILS = 5       # 接続確認がこの回数続けて失敗した�
 
 # ---- 表示テキスト(10言語。ログは日本語と英語のみで、他の言語では英語になる) ----
 
+DEFAULT_LANGUAGE = "en"
 LANGUAGES = {  # 言語コード -> (言語名, 文字が正しく出るフォント)
-    "ja": ("日本語", "Yu Gothic UI"),
     "en": ("English", "Segoe UI"),
+    "ja": ("日本語", "Yu Gothic UI"),
     "zh-CN": ("简体中文", "Microsoft YaHei UI"),
     "zh-TW": ("繁體中文", "Microsoft JhengHei UI"),
     "ko": ("한국어", "Malgun Gothic"),
@@ -134,21 +135,8 @@ TEXTS["en"].update({
 })
 
 
-def _system_language() -> str:
-    """Windowsの表示言語から初期の言語を決める。"""
-    try:
-        import ctypes
-        lang_id = ctypes.windll.kernel32.GetUserDefaultUILanguage()
-    except Exception:
-        return "ja" if os.environ.get("LANG", "").lower().startswith("ja") else "en"
-    primary = lang_id & 0x3FF
-    if primary == 0x04:  # 中国語: 台湾・香港・マカオは繁体字
-        return "zh-TW" if lang_id in (0x0404, 0x0C04, 0x1404) else "zh-CN"
-    return {0x11: "ja", 0x12: "ko", 0x0A: "es", 0x0C: "fr", 0x07: "de", 0x16: "pt", 0x19: "ru"}.get(primary, "en")
-
-
 def load_language() -> str:
-    """設定で選んだ言語。未設定ならWindowsの表示言語に合わせる。"""
+    """設定で選んだ言語。未設定なら英語。"""
     try:
         with open(LANG_FILE, encoding="ascii") as f:
             code = f.read().strip()
@@ -156,7 +144,7 @@ def load_language() -> str:
             return code
     except OSError:
         pass
-    return _system_language()
+    return DEFAULT_LANGUAGE
 
 
 def save_language(code: str) -> None:

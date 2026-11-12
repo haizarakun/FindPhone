@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">スマホ探し</string>
+    <string name="app_name">Find Phone</string>
     <string name="status_on">待受中</string>
     <string name="status_off">停止中</string>
     <string name="status_ringing">鳴動中</string>

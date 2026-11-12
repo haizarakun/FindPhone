@@ -83,4 +83,7 @@ jobs:
           merge-multiple: true
       - env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" FindPhone.apk FindPhone.exe --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes
+        run: |
+          mv FindPhone.apk FindPhone-Android.apk
+          mv FindPhone.exe FindPhone-Windows.exe
+          gh release create "$GITHUB_REF_NAME" FindPhone-Android.apk FindPhone-Windows.exe --repo "$GITHUB_REPOSITORY" --title "FindPhone $GITHUB_REF_NAME" --generate-notes

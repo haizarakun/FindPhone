@@ -1,6 +1,5 @@
 package com.akun.findphone;
 
-import android.app.Activity;
 import android.content.Intent;
 import android.os.Bundle;
 import android.os.Handler;
@@ -11,7 +10,7 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 
 /** 鳴動中に全画面で点滅する画面。ロック画面の上にも表示され、大きなボタンで止められる。 */
-public class RingActivity extends Activity {
+public class RingActivity extends LocalizedActivity {
     // 点滅は約1.4回/秒。光過敏への配慮で毎秒3回未満に抑える
     private static final long BLINK_MS = 350;
 

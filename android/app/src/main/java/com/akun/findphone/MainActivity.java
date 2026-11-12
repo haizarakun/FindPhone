@@ -1,7 +1,6 @@
 package com.akun.findphone;
 
 import android.Manifest;
-import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -18,7 +17,7 @@ import android.widget.Switch;
 import android.widget.TextView;
 
 /** ホーム画面: 待受の状態・ペアリングコード・テスト鳴動。 */
-public class MainActivity extends Activity {
+public class MainActivity extends LocalizedActivity {
     private static final String HIDDEN_CODE = "•••• •••• ••••";
 
     private final Handler ui = new Handler(Looper.getMainLooper());

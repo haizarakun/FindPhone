@@ -1,6 +1,5 @@
 package com.akun.findphone;
 
-import android.app.Activity;
 import android.app.NotificationManager;
 import android.content.ClipData;
 import android.content.ClipboardManager;
@@ -19,7 +18,7 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 /** ヘルプ画面: 動かない原因の自動診断、PC側の確認点、サポート窓口、ログ。 */
-public class HelpActivity extends Activity {
+public class HelpActivity extends LocalizedActivity {
     private static final String DISCORD_URL = "https://discord.gg/hXv7G3xtVf";
 
     private enum Level { OK, WARN, BAD }

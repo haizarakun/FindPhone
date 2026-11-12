@@ -5,6 +5,7 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
+import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
 import android.graphics.drawable.Icon;
@@ -81,6 +82,11 @@ public class RingService extends Service {
     private int savedVolume = -1;
     private String torchId;
     private boolean torchOn;
+
+    @Override
+    protected void attachBaseContext(Context base) {
+        super.attachBaseContext(Lang.wrap(base)); // 通知とログもアプリ内の言語設定に合わせる
+    }
 
     @Override
     public IBinder onBind(Intent i) {

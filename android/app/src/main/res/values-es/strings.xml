@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Buscar teléfono</string>
+    <string name="app_name">Find Phone</string>
     <string name="status_on">En espera</string>
     <string name="status_off">Detenido</string>
     <string name="status_ringing">Sonando</string>

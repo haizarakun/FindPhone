@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">폰 찾기</string>
+    <string name="app_name">Find Phone</string>
     <string name="status_on">대기 중</string>
     <string name="status_off">중지됨</string>
     <string name="status_ringing">울리는 중</string>

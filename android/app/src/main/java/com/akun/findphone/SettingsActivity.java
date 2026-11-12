@@ -1,19 +1,16 @@
 package com.akun.findphone;
 
-import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
 import android.media.Ringtone;
 import android.media.RingtoneManager;
 import android.net.Uri;
-import android.os.Build;
 import android.os.Bundle;
-import android.provider.Settings;
 import android.widget.LinearLayout;
 import android.widget.Toast;
 
 /** 設定画面: 鳴らし方・起動・言語・ペアリングコードの作り直し。 */
-public class SettingsActivity extends Activity {
+public class SettingsActivity extends LocalizedActivity {
     private static final int REQ_SOUND = 1;
     private LinearLayout content;
 
@@ -45,9 +42,8 @@ public class SettingsActivity extends Activity {
 
         LinearLayout general = Ui.card(this);
         general.addView(toggleRow(R.string.start_on_boot, 0, Prefs.BOOT));
-        if (Build.VERSION.SDK_INT >= 33) { // アプリごとの言語設定はAndroid 13以降
-            general.addView(Ui.row(this, getString(R.string.language), null, Ui.chevron(this), v -> openLanguage()));
-        }
+        general.addView(Ui.row(this, getString(R.string.language), Lang.NAMES[Lang.currentIndex(this)],
+                Ui.chevron(this), v -> pickLanguage()));
         general.addView(Ui.row(this, getString(R.string.regenerate), getString(R.string.regenerate_desc),
                 null, v -> confirmRegenerate()));
         content.addView(general);
@@ -128,9 +124,26 @@ public class SettingsActivity extends Activity {
 
     // ---- その他 ----
 
-    private void openLanguage() {
+    private void pickLanguage() {
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.language)
+                .setSingleChoiceItems(Lang.NAMES, Lang.currentIndex(this), (dialog, which) -> {
+                    dialog.dismiss();
+                    if (which == Lang.currentIndex(this)) return;
+                    Lang.set(this, Lang.CODES[which]);
+                    restartServiceForLanguage();
+                    recreate();
+                })
+                .setNegativeButton(R.string.cancel, null)
+                .show();
+    }
+
+    /** 待受中なら、通知の文言が新しい言語になるようサービスを起動し直す。 */
+    private void restartServiceForLanguage() {
+        if (!Prefs.get(this, Prefs.ON)) return;
         try {
-            startActivity(new Intent(Settings.ACTION_APP_LOCALE_SETTINGS, Uri.parse("package:" + getPackageName())));
+            stopService(new Intent(this, RingService.class));
+            startForegroundService(new Intent(this, RingService.class));
         } catch (Exception e) {
             AppLog.add(getString(R.string.log_error, e.toString()));
         }

@@ -1,78 +1,82 @@
-# FindPhone(スマホ探し)
+# FindPhone
 
-同じネットワーク内のPCから、見当たらないスマホを鳴らすアプリです。
-音・画面の点滅・ライトの点滅・バイブで場所を知らせます。
+English | [日本語](README.ja.md)
 
-- **Android**: `FindPhone.apk`(Android 8.0 以降)
-- **Windows**: `FindPhone.exe`(インストール不要)
+Ring a misplaced phone from a PC on the same network.
+The phone announces itself with sound, a flashing screen, a blinking flashlight and vibration.
 
-## 導入手順
+- **Android**: `FindPhone-Android.apk` (Android 8.0 or later)
+- **Windows**: `FindPhone-Windows.exe` (no installation required)
 
-### 1. スマホ(Android)
+Both are available from [Releases](../../releases).
 
-1. Releases から `FindPhone.apk` をスマホにダウンロードして開く。
-2. 「提供元不明のアプリ」の確認が出たら、そのブラウザ(またはファイルアプリ)にインストールを許可する。
-3. アプリを開き、通知を許可する。待受は自動で始まり、通知欄に「PCからの呼び出しを待っています」と出る。
-4. 「ヘルプ・うまく動かないとき」を開き、診断がすべて ✓ になるよう「直す」を押す(電池の最適化の解除を推奨)。
+## Setup
 
-### 2. PC(Windows)
+### 1. Phone (Android)
 
-1. Releases から `FindPhone.exe` をダウンロードし、好きな場所に置いて起動する(インストール不要)。
-2. 初回に Windows のファイアウォールの確認が出たら「プライベート ネットワーク」を許可する。
-3. SmartScreen の警告が出た場合は「詳細情報」→「実行」。
+1. Download `FindPhone-Android.apk` from Releases onto the phone and open it.
+2. If Android asks about installing unknown apps, allow it for that browser (or file manager).
+3. Open the app and allow notifications. Listening starts automatically and a notification appears.
+4. Open "Help & troubleshooting" and press "Fix" until every check shows ✓ (turning off battery optimization is recommended).
 
-### 3. ペアリング(初回のみ)
+### 2. PC (Windows)
 
-1. スマホの「ペアリングコード」で「表示」を押す(または「共有」で自分のPCへ送る)。
-2. PCアプリの「ペアリング」にコードを入力して OK。コピーしてあれば自動で入力される。
-3. PCアプリ上部の表示が緑の「接続中」になれば完了。
+1. Download `FindPhone-Windows.exe` from Releases, put it anywhere and run it (no installation required).
+2. If Windows Firewall asks on first launch, allow "Private networks".
+3. If SmartScreen shows a warning, choose "More info" → "Run anyway".
 
-### 4. 使う
+### 3. Pairing (first time only)
 
-- PCアプリの丸いボタンでスマホが鳴る。`Enter`=鳴らす / `Esc`=止める。
-- スマホ側は画面の「止める」、または通知の「止める」で止まる。設定した時間(既定90秒)で自動停止する。
-- 鳴らす音・時間・画面点滅・ライト・バイブは、スマホの「設定」で変えられる。
-- PCアプリの言語は、下部の「言語」から切り替えられる。
+1. On the phone, press "Show" under "Pairing code" (or "Share" to send it to your own PC).
+2. Enter the code in "Pair" on the PC app and press OK. If the code is on the clipboard, it is filled in automatically.
+3. Pairing is complete when the top of the PC app shows a green "Connected".
 
-PCとスマホは同じルーターにつながっている必要があります(ゲストWi-Fiは不可)。
+### 4. Use
 
-## うまく動かないとき
+- Press the round button on the PC app to ring the phone. `Enter` = ring / `Esc` = stop.
+- On the phone, stop with the "STOP" button on screen or the "Stop" action in the notification. Ringing stops automatically after the set duration (90 seconds by default).
+- Sound, duration, screen flash, flashlight and vibration can be changed in the phone's "Settings".
 
-スマホアプリの「ヘルプ・うまく動かないとき」を開くと、原因を自動で診断して「直す」ボタンを出します
-(待受の停止、Wi-Fi未接続、VPN、通知、電池の最適化、ロック画面での点滅の許可)。
-解決しない場合は、同じ画面の「ログをコピー」を添えて Discord で質問してください。
+The PC and the phone must be connected to the same router (a guest Wi-Fi will not work).
 
-## サポート
+## Troubleshooting
 
-サポートは Discord のみで受け付けます(Issue・メール・DM には対応しません): https://discord.gg/hXv7G3xtVf
+Open "Help & troubleshooting" in the phone app. It diagnoses the cause automatically and offers a "Fix" button
+(listening stopped, no Wi-Fi, VPN, notifications, battery optimization, permission to flash on the lock screen).
+If that does not solve it, ask on Discord and attach the output of "Copy log" from the same screen.
 
-## 対応言語
+## Support
 
-日本語 / English / 简体中文 / 繁體中文 / 한국어 / Español / Français / Deutsch / Português / Русский
-(スマホは端末の言語設定に従います。Android 13以降はアプリごとに変更可能。PCアプリは画面下部の「言語」で切り替え)
+Support is provided on Discord only (issues, e-mail and direct messages are not answered): https://discord.gg/hXv7G3xtVf
 
-## セキュリティ
+## Languages
 
-- 通信は共有鍵(128bit乱数)によるHMAC-SHA256の署名付き。鍵そのものは通信に流れません。
-- チャレンジ&レスポンス(1回限り・10秒有効)で、盗聴した通信の再送(リプレイ)を防止。
-- LAN以外からのパケットは無視。探索への応答数にも上限があります。
-- 鍵の保管: スマホは Android Keystore で暗号化、PCは Windows DPAPI で暗号化。
-- ペアリングコードの表示中はスクリーンショット・画面録画を禁止。画面を離れると自動で隠れます。
-- 鳴動は設定した時間(既定90秒)で自動停止。
+English / 日本語 / 简体中文 / 繁體中文 / 한국어 / Español / Français / Deutsch / Português / Русский
+(English by default. Change it in "Settings" → "Language" on the phone, and with "Language" at the bottom of the PC app.)
 
-## 通信仕様
+## Security
 
-UDP 47321(スマホ側で待受)。
+- All traffic is signed with HMAC-SHA256 using a shared key (128-bit random). The key itself is never sent.
+- Challenge and response (single use, valid for 10 seconds) prevents replay of captured traffic.
+- Packets from outside the LAN are ignored, and the number of answers to searches is rate-limited.
+- Key storage: encrypted with Android Keystore on the phone and with Windows DPAPI on the PC.
+- Screenshots and screen recording are blocked while the pairing code is shown, and the code is hidden when you leave the screen.
+- Ringing stops automatically after the set duration (90 seconds by default).
+
+## Protocol
+
+UDP 47321 (the phone listens).
 
 ```
-PC   -> 'H' + cn(8)                 探索
-端末 -> 'C' + cn + sn(16) + HMAC    チャレンジ
-PC   -> 'R'|'S' + sn + HMAC         鳴らす / 止める
-端末 -> 'A' + cmd + sn + HMAC       受理通知
+PC    -> 'H' + cn(8)                 search
+Phone -> 'C' + cn + sn(16) + HMAC    challenge
+PC    -> 'R'|'S' + sn + HMAC         ring / stop
+Phone -> 'A' + cmd + sn + HMAC       acknowledgement
 ```
 
-## ライセンス
+## License
 
-独自ライセンスです(オープンソースではありません)。ソースコードは確認用に公開していますが、
-再配布・改変・ビルド・再署名・販売・他サイトへの掲載はできません。
-記事などで紹介する場合は、事前に Discord で連絡してください。詳細は [LICENSE](LICENSE) を参照。
+Proprietary license (this is not open source). The source code is published so that it can be inspected,
+but redistribution, modification, building, re-signing, selling and listing on other sites are not permitted.
+Contact the author on Discord before featuring this software in an article or video.
+See [LICENSE](LICENSE) for the full terms (Japanese).

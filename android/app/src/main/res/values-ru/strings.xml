@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Поиск телефона</string>
+    <string name="app_name">Find Phone</string>
     <string name="status_on">Ожидание</string>
     <string name="status_off">Остановлено</string>
     <string name="status_ringing">Звонит</string>
