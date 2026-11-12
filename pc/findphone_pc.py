@@ -55,7 +55,7 @@ def load_key():
 def parse_code(text: str) -> bytes:
     s = "".join(ch for ch in text.upper() if ch.isalnum())
     key = base64.b32decode(s + "=" * (-len(s) % 8))
-    if len(key) != 20:
+    if len(key) != 16:
         raise ValueError("length")
     return key
 
@@ -157,15 +157,26 @@ class App:
         self.status.config(text=msg)
 
     def pair(self):
-        text = simpledialog.askstring("ペアリング", "スマホに表示されたコードを入力", parent=self.root)
-        if not text:
-            return
+        """クリップボードのコードを優先し、無ければ入力ダイアログで受け取る。"""
+        for text in (self._clipboard(), None):
+            if text is None:
+                text = simpledialog.askstring("ペアリング", "スマホに表示されたコードを入力", parent=self.root)
+                if not text:
+                    return
+            try:
+                self.key = parse_code(text)
+                save_key(self.key)
+                self.show("ペアリング完了")
+                return
+            except (ValueError, OSError):
+                continue
+        messagebox.showerror("エラー", "コードが正しくありません")
+
+    def _clipboard(self):
         try:
-            self.key = parse_code(text)
-            save_key(self.key)
-            self.show("ペアリング完了")
-        except (ValueError, OSError):
-            messagebox.showerror("エラー", "コードが正しくありません")
+            return self.root.clipboard_get()
+        except tk.TclError:
+            return ""
 
     def run(self, cmd):
         if self.key is None:
