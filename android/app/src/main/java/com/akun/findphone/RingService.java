@@ -63,18 +63,27 @@ public class RingService extends Service {
             stopRing();
             return START_STICKY;
         }
+        log("サービス開始");
         Notification n = notification(false);
         if (Build.VERSION.SDK_INT >= 34) {
             startForeground(NOTIF_ID, n, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
         } else {
             startForeground(NOTIF_ID, n);
         }
-        if (thread == null) startListening();
+        log("常駐通知を表示");
+        if (thread == null) {
+            try {
+                startListening();
+            } catch (Exception e) {
+                log("待受の準備に失敗: " + e);
+            }
+        }
         return START_STICKY;
     }
 
     @Override
     public void onDestroy() {
+        log("サービス終了");
         running = false;
         DatagramSocket s = sock;
         if (s != null) s.close();
