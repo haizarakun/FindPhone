@@ -42,7 +42,10 @@ then scan it with "Scan the QR code on the PC" in the phone app (camera permissi
 
 - The PC app starts with Windows and stays in the notification area (system tray) at the bottom right of the taskbar.
   Closing the window keeps it in the tray. Click the icon to open it; right-click to ring, stop,
-  turn "Start with Windows" on or off, or exit.
+  turn "Start with Windows" on or off, or exit. The same switch is at the bottom of the window.
+- When the app runs as administrator, Windows refuses to start it from the startup list,
+  so it is registered as a scheduled task instead. Administrator rights are not needed;
+  running it normally is recommended.
 
 The PC and the phone must be connected to the same router (a guest Wi-Fi will not work).
 

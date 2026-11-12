@@ -63,7 +63,7 @@ _UI_KEYS = ("title ring stop pair show_log hide_log language link_checking link_
             "msg_ready msg_unpaired msg_searching msg_ringing msg_stopped msg_not_found msg_paired "
             "pair_prompt pair_bad pair_save_failed ok cancel "
             "show_qr qr_hint qr_waiting update_available updating update_failed "
-            "tray_open autostart quit").split()
+            "tray_open autostart quit on off").split()
 
 _UI = {
     "ja": "スマホ探し|鳴らす|止める|ペアリング|ログを表示|ログを隠す|言語|確認中…|接続中  {ip}|未接続|未ペアリング|"
@@ -130,16 +130,16 @@ _UI_MORE = {  # QRペアリングとアップデートの文言
     "ru": "Показать QR-код|Отсканируйте его через «Сканировать QR-код на ПК» в приложении на телефоне|Ожидание телефона…|Обновить до v{v}|Обновление…|Не удалось обновить",
 }
 _UI_TRAY = {  # 通知領域(タスクバー右下)のメニュー
-    "ja": "開く|Windowsの起動時に開始|終了",
-    "en": "Open|Start with Windows|Exit",
-    "zh-CN": "打开|随 Windows 启动|退出",
-    "zh-TW": "開啟|隨 Windows 啟動|結束",
-    "ko": "열기|Windows 시작 시 실행|종료",
-    "es": "Abrir|Iniciar con Windows|Salir",
-    "fr": "Ouvrir|Démarrer avec Windows|Quitter",
-    "de": "Öffnen|Mit Windows starten|Beenden",
-    "pt": "Abrir|Iniciar com o Windows|Sair",
-    "ru": "Открыть|Запускать вместе с Windows|Выход",
+    "ja": "開く|Windowsの起動時に開始|終了|オン|オフ",
+    "en": "Open|Start with Windows|Exit|On|Off",
+    "zh-CN": "打开|随 Windows 启动|退出|开|关",
+    "zh-TW": "開啟|隨 Windows 啟動|結束|開|關",
+    "ko": "열기|Windows 시작 시 실행|종료|켬|끔",
+    "es": "Abrir|Iniciar con Windows|Salir|Sí|No",
+    "fr": "Ouvrir|Démarrer avec Windows|Quitter|Oui|Non",
+    "de": "Öffnen|Mit Windows starten|Beenden|An|Aus",
+    "pt": "Abrir|Iniciar com o Windows|Sair|Sim|Não",
+    "ru": "Открыть|Запускать вместе с Windows|Выход|Вкл|Выкл",
 }
 TEXTS = {code: dict(zip(_UI_KEYS, "|".join((blob, _UI_MORE[code], _UI_TRAY[code])).split("|")))
          for code, blob in _UI.items()}
@@ -477,9 +477,51 @@ def _already_running() -> bool:
 # ---- Windowsの起動時に自動で開始 ----
 
 _RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
+_TASK_NAME = APP_NAME  # タスクスケジューラに登録する名前
 
 
-def autostart_enabled() -> bool:
+def _is_admin() -> bool:
+    try:
+        import ctypes
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:
+        return False
+
+
+def _run_hidden(args) -> int:
+    """黒い窓を出さずにコマンドを実行し、終了コードを返す。"""
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    try:
+        return subprocess.run(args, capture_output=True, timeout=20, creationflags=flags).returncode
+    except Exception:
+        return 1
+
+
+def _autostart_command() -> str:
+    # --tray: ウィンドウを出さず、通知領域に入った状態で起動する
+    return f'"{sys.executable}" --tray'
+
+
+# 登録先は2通り。管理者権限を要求するexeはスタートアップ(レジストリ)からは起動できないため、
+# その場合だけタスクスケジューラ(管理者として実行)に登録する。
+
+def _registry_autostart(enabled: bool) -> bool:
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _RUN_KEY, 0, winreg.KEY_SET_VALUE) as key:
+            if enabled:
+                winreg.SetValueEx(key, APP_NAME, 0, winreg.REG_SZ, _autostart_command())
+            else:
+                try:
+                    winreg.DeleteValue(key, APP_NAME)
+                except FileNotFoundError:
+                    pass
+        return True
+    except (ImportError, OSError):
+        return False
+
+
+def _registry_autostart_enabled() -> bool:
     try:
         import winreg
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _RUN_KEY) as key:
@@ -489,23 +531,41 @@ def autostart_enabled() -> bool:
         return False
 
 
-def set_autostart(enabled: bool) -> None:
-    """ログイン時の自動起動を登録/解除する(現在のユーザーのみ。管理者権限は不要)。"""
+def _task_autostart(enabled: bool) -> bool:
+    if not enabled:
+        _run_hidden(["schtasks", "/Delete", "/TN", _TASK_NAME, "/F"])
+        return True
+    return _run_hidden(["schtasks", "/Create", "/TN", _TASK_NAME, "/TR", _autostart_command(),
+                        "/SC", "ONLOGON", "/RL", "HIGHEST", "/F"]) == 0
+
+
+def _task_autostart_enabled() -> bool:
+    return _run_hidden(["schtasks", "/Query", "/TN", _TASK_NAME]) == 0
+
+
+def autostart_enabled() -> bool:
+    return _registry_autostart_enabled() or _task_autostart_enabled()
+
+
+def set_autostart(enabled: bool) -> bool:
+    """ログイン時の自動起動を登録/解除する。登録できたら True。"""
     if not getattr(sys, "frozen", False):
-        return  # exeとして動いている時だけ登録する
-    try:
-        import winreg
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _RUN_KEY, 0, winreg.KEY_SET_VALUE) as key:
-            if enabled:  # --tray: ウィンドウを出さず、通知領域に入った状態で起動する
-                winreg.SetValueEx(key, APP_NAME, 0, winreg.REG_SZ, f'"{sys.executable}" --tray')
-            else:
-                winreg.DeleteValue(key, APP_NAME)
-    except (ImportError, OSError):
-        pass
+        return False  # exeとして動いている時だけ登録する
+    if not enabled:
+        _registry_autostart(False)
+        _task_autostart(False)
+        return True
+    if _is_admin():
+        # 管理者として起動しているなら、同じ権限で起動し直せるタスクとして登録する
+        if _task_autostart(True):
+            _registry_autostart(False)  # 二重起動を避けるため、古い登録は消す
+            return True
+    _task_autostart(False)
+    return _registry_autostart(True)
 
 
 def setup_autostart() -> None:
-    """初回だけ自動起動をオンにする。以降は利用者の選択を尊重し、exeを移動していたら場所だけ更新する。"""
+    """初回だけ自動起動をオンにする。以降は利用者の選択を尊重し、登録済みなら場所と方式だけ更新する。"""
     if not os.path.exists(AUTOSTART_FLAG_FILE):
         set_autostart(True)
         try:
@@ -734,7 +794,7 @@ class App:
         elif item == self.MENU_STOP:
             self.run(b"S")
         elif item == self.MENU_AUTOSTART:
-            set_autostart(not autostart_enabled())
+            self.toggle_autostart()
         elif item == self.MENU_QUIT:
             self.quit()
 
@@ -791,6 +851,10 @@ class App:
                             cursor="hand2")
         language.pack(side="left", padx=self.px(10))
         language.bind("<Button-1>", self._pick_language)
+        self.autostart_label = tk.Label(links, fg=SUB, bg=BG, font=(FONT, 9), cursor="hand2")
+        self.autostart_label.pack(side="left", padx=self.px(10))
+        self.autostart_label.bind("<Button-1>", lambda e: self.toggle_autostart())
+        self._show_autostart()
 
         self.log_box = tk.Text(root, width=44, height=9, bg=CARD, fg=SUB, relief="flat", font=("Consolas", 9),
                                state="disabled", wrap="word", padx=self.px(8), pady=self.px(6))
@@ -800,6 +864,16 @@ class App:
         self.log_visible = False
         self.show(tr("msg_unpaired") if self.key is None else tr("msg_ready"))
         self._show_update_link()
+
+    # ---- 自動起動 ----
+
+    def _show_autostart(self):
+        state = tr("on") if autostart_enabled() else tr("off")
+        self.autostart_label.config(text=f"{tr('autostart')}: {state}")
+
+    def toggle_autostart(self):
+        set_autostart(not autostart_enabled())
+        self._show_autostart()
 
     # ---- アップデート ----
 
@@ -1106,6 +1180,7 @@ def _selftest() -> int:
         for code in LANGUAGES:  # 全言語で画面を組み立てられることを確認
             app.change_language(code)
         app.toggle_log()
+        app.toggle_autostart()  # exeでない時は何も登録されない
         app.pair().destroy()
         if qrcode is not None:
             app.pair_by_qr().destroy()
